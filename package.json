@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/vone_boot.js",
-    "dev": "ts-node src/vone_boot.ts"
+    "dev": "ts-node src/vone_boot.ts",
+    "test": "ts-node src/server/vone_model_router.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
