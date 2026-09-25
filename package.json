@@ -1,0 +1,16 @@
+{
+  "name": "vone-core",
+  "version": "1.0.0",
+  "description": "V-ONE core: sandboxed VFS, tool interpreter, patch engine, IPC bridge and IDE viewport.",
+  "main": "dist/vone_boot.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/vone_boot.js",
+    "dev": "ts-node src/vone_boot.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2"
+  }
+}
