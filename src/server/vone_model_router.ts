@@ -40,8 +40,13 @@ export interface ModelCaller {
     run(route: ModelRoute, request: InferenceRequest): Promise<{ text: string; neuronsUsed: number }>;
 }
 
+export type RoutingBlockReason = 'physicalOutputLocked' | 'paidBlocked' | 'unknownCost' | 'noCapacity';
+
 export class RoutingBlockedError extends Error {
-    constructor(public readonly reason: string) {
+    constructor(
+        public readonly reason: string,
+        public readonly category: RoutingBlockReason,
+    ) {
         super(`[ROUTING BLOCKED]: ${reason}`);
         this.name = 'RoutingBlockedError';
     }
@@ -76,18 +81,38 @@ export class ModelRouter {
         if (request.requiresPhysicalOutput && this.gates.physicalOutput === 'LOCKED') {
             throw new RoutingBlockedError(
                 'physical_output gate is LOCKED; refusing a request that targets physical hardware.',
+                'physicalOutputLocked',
             );
         }
 
+        let anyPaidFiltered = false;
+        let anyUnknownCostFiltered = false;
+
         const candidates = this.routes.filter((route) => {
-            if (route.tier === 'paid' && this.gates.paidBlocked === 'INVIOLABLE') return false;
-            if (route.costPerMTokUsd === null && this.gates.unknownCost === 'HOLD') return false;
+            if (route.tier === 'paid' && this.gates.paidBlocked === 'INVIOLABLE') {
+                anyPaidFiltered = true;
+                return false;
+            }
+            if (route.costPerMTokUsd === null && this.gates.unknownCost === 'HOLD') {
+                anyUnknownCostFiltered = true;
+                return false;
+            }
             return SELECTABLE_STATES.has(route.state);
         });
 
         if (candidates.length === 0) {
+            // Priority reflects which gate a caller could act on first: a paid
+            // route becoming free-tier changes nothing while cost stays unknown,
+            // but an unknown-cost route becoming known-cost immediately helps -
+            // so unknown cost is surfaced whenever both are in play.
+            const category: RoutingBlockReason = anyUnknownCostFiltered
+                ? 'unknownCost'
+                : anyPaidFiltered
+                  ? 'paidBlocked'
+                  : 'noCapacity';
             throw new RoutingBlockedError(
                 'No route is both cost-known and in a selectable capacity state under the current gates.',
+                category,
             );
         }
 

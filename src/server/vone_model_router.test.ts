@@ -27,7 +27,11 @@ async function main(): Promise<void> {
         routes[0].state = 'FREE_EXHAUSTED';
         routes[1].state = 'FREE_AVAILABLE';
         const router = new ModelRouter(routes, createDefaultGates(), new StubCaller(10));
-        assert.throws(() => router.selectRoute({ prompt: 'x' }), RoutingBlockedError);
+        assert.throws(() => router.selectRoute({ prompt: 'x' }), (error: unknown) => {
+            assert.ok(error instanceof RoutingBlockedError);
+            assert.equal(error.category, 'paidBlocked');
+            return true;
+        });
     }
 
     // A route with unknown per-token cost is held rather than treated as free.
@@ -43,7 +47,11 @@ async function main(): Promise<void> {
             },
         ];
         const router = new ModelRouter(routes, createDefaultGates(), new StubCaller(10));
-        assert.throws(() => router.selectRoute({ prompt: 'x' }), RoutingBlockedError);
+        assert.throws(() => router.selectRoute({ prompt: 'x' }), (error: unknown) => {
+            assert.ok(error instanceof RoutingBlockedError);
+            assert.equal(error.category, 'unknownCost');
+            return true;
+        });
     }
 
     // Requests that target physical hardware are refused while the gate is locked.
@@ -51,7 +59,11 @@ async function main(): Promise<void> {
         const router = new ModelRouter(createDefaultRoutes(), createDefaultGates(), new StubCaller(10));
         assert.throws(
             () => router.selectRoute({ prompt: 'send gcode', requiresPhysicalOutput: true }),
-            RoutingBlockedError,
+            (error: unknown) => {
+                assert.ok(error instanceof RoutingBlockedError);
+                assert.equal(error.category, 'physicalOutputLocked');
+                return true;
+            },
         );
     }
 
