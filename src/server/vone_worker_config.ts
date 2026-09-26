@@ -10,12 +10,21 @@ import { SUPPORTED_CAPABILITIES } from './vone_execution_contract';
  *   VONE_WORKER_POLL_MS     idle poll interval, default 5000 (optional)
  *   VONE_WORKER_TIMEOUT_MS  per-request timeout, default 15000 (optional)
  *   VONE_WORKER_ROOT        sandbox root for jobs + ledger, default cwd (optional)
- *   VONE_CF_ACCOUNT_ID      Cloudflare account for the free Workers AI route (optional here;
- *   VONE_CF_AI_TOKEN        both-or-neither; the boot entry fails closed without them)
+ *   VONE_MODEL_ROUTE        `ollama` or `cloudflare`; when unset it is inferred from which
+ *                           backend is configured (Ollama first)
+ *   VONE_OLLAMA_MODEL       local model name - required for the ollama route
+ *   VONE_OLLAMA_URL         Ollama daemon, default http://127.0.0.1:11434 - loopback only
+ *   VONE_OLLAMA_TIMEOUT_MS  per-generation timeout, default 300000 (optional)
+ *   VONE_CF_ACCOUNT_ID      Cloudflare account + token for the free Workers AI route -
+ *   VONE_CF_AI_TOKEN        both-or-neither, required only when that route is selected
  *
  * Missing/empty required values fail closed here, before any transport is
  * constructed - so no network call can happen without a credential. Error
  * messages and describeWorkerConfig() report only presence, never values.
+ *
+ * The ollama route only counts as zero-cost when it is really local: a
+ * non-loopback URL or an Ollama `cloud` model (served remotely, with its own
+ * limits and pricing) is refused here as unknown cost.
  */
 
 /**
@@ -56,7 +65,17 @@ export interface WorkerConfig {
     readonly workRoot: string | null;
     /** null when neither VONE_CF_ACCOUNT_ID nor VONE_CF_AI_TOKEN is set. */
     readonly cloudflareAi: { readonly accountId: string; readonly credential: WorkerCredential } | null;
+    /** Which backend serves model calls; null when none is configured (the factory then refuses). */
+    readonly modelRoute: ModelRouteKind | null;
+    /** Set when modelRoute is `ollama`. */
+    readonly ollama: { readonly baseUrl: string; readonly model: string; readonly timeoutMs: number } | null;
 }
+
+export type ModelRouteKind = 'ollama' | 'cloudflare';
+
+const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
+/** Ollama tags served remotely by ollama.com, e.g. `gpt-oss:120b-cloud`. */
+const OLLAMA_CLOUD_TAG = /(^|[:-])cloud$/i;
 
 export class WorkerConfigError extends Error {
     constructor(public readonly missingOrInvalid: readonly string[], detail?: string) {
@@ -129,6 +148,47 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
         details.push('VONE_CF_ACCOUNT_ID and VONE_CF_AI_TOKEN must be set together');
     }
 
+    const ollamaModel = (env.VONE_OLLAMA_MODEL ?? '').trim();
+    const requestedRoute = (env.VONE_MODEL_ROUTE ?? '').trim();
+    let modelRoute: ModelRouteKind | null = null;
+    if (requestedRoute === 'ollama' || requestedRoute === 'cloudflare') {
+        modelRoute = requestedRoute;
+    } else if (requestedRoute !== '') {
+        problems.push('VONE_MODEL_ROUTE');
+        details.push('VONE_MODEL_ROUTE must be ollama or cloudflare');
+    } else if (ollamaModel) {
+        modelRoute = 'ollama';
+    } else if (cfAccountId && cfTokenPresent) {
+        modelRoute = 'cloudflare';
+    }
+
+    let ollama: WorkerConfig['ollama'] = null;
+    if (modelRoute === 'ollama') {
+        if (!ollamaModel || !/^[A-Za-z0-9._:\/-]{1,128}$/.test(ollamaModel)) {
+            problems.push('VONE_OLLAMA_MODEL');
+            details.push('the ollama route needs a local model name in VONE_OLLAMA_MODEL');
+        } else if (OLLAMA_CLOUD_TAG.test(ollamaModel)) {
+            problems.push('VONE_OLLAMA_MODEL');
+            details.push('Ollama cloud models run remotely with unknown cost (UNKNOWN_COST=HOLD)');
+        }
+        const ollamaUrl = ((env.VONE_OLLAMA_URL ?? '').trim() || DEFAULT_OLLAMA_URL).replace(/\/+$/, '');
+        try {
+            const parsed = new URL(ollamaUrl);
+            if (!['http:', 'https:'].includes(parsed.protocol) || !LOOPBACK_HOSTS.has(parsed.hostname) || parsed.username || parsed.password) {
+                problems.push('VONE_OLLAMA_URL');
+                details.push('VONE_OLLAMA_URL must be a loopback address (a remote Ollama has unknown cost)');
+            }
+        } catch {
+            problems.push('VONE_OLLAMA_URL');
+            details.push('VONE_OLLAMA_URL is not a valid URL');
+        }
+        const timeoutMs = readPositiveInt(env, 'VONE_OLLAMA_TIMEOUT_MS', 300_000, problems);
+        ollama = { baseUrl: ollamaUrl, model: ollamaModel, timeoutMs };
+    } else if (modelRoute === 'cloudflare' && !(cfAccountId && cfTokenPresent)) {
+        problems.push('VONE_CF_ACCOUNT_ID', 'VONE_CF_AI_TOKEN');
+        details.push('the cloudflare route is selected but its credentials are not configured - no fallback route is used');
+    }
+
     if (problems.length > 0) {
         throw new WorkerConfigError([...new Set(problems)], details.length ? details.join('; ') : undefined);
     }
@@ -144,6 +204,8 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
         cloudflareAi: cfAccountId
             ? Object.freeze({ accountId: cfAccountId, credential: createWorkerCredential(cfToken, 'VONE_CF_AI_TOKEN') })
             : null,
+        modelRoute,
+        ollama: ollama ? Object.freeze(ollama) : null,
     });
 }
 
@@ -158,5 +220,8 @@ export function describeWorkerConfig(config: WorkerConfig): Record<string, unkno
         capabilities: [...config.capabilities],
         workRoot: config.workRoot ?? '(cwd)',
         cloudflareAiToken: config.cloudflareAi ? 'present' : 'absent',
+        modelRoute: config.modelRoute ?? '(none)',
+        ollamaUrl: config.ollama?.baseUrl ?? null,
+        ollamaModel: config.ollama?.model ?? null,
     };
 }

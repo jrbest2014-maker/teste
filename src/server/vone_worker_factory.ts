@@ -14,6 +14,7 @@ import {
 } from './vone_model_router';
 import type { MasterTransport } from './vone_execution_contract';
 import { HttpMasterTransport } from './vone_http_master_transport';
+import { OllamaCaller } from './vone_ollama_caller';
 import { SandboxResultLedger, VOneMasterWorker, type SubmitRetryPolicy, type WorkerLogEvent } from './vone_master_worker';
 import { WorkerConfigError, loadWorkerConfig, type WorkerConfig } from './vone_worker_config';
 
@@ -55,17 +56,20 @@ export interface ComposedWorker {
 export function createWorkerFromConfig(config: WorkerConfig, deps: WorkerDependencies = {}): ComposedWorker {
     let caller = deps.caller;
     if (!caller) {
-        if (!config.cloudflareAi) {
+        if (config.modelRoute === 'ollama' && config.ollama) {
+            caller = new OllamaCaller({ baseUrl: config.ollama.baseUrl, timeoutMs: config.ollama.timeoutMs, fetchImpl: deps.fetchImpl });
+        } else if (config.modelRoute === 'cloudflare' && config.cloudflareAi) {
+            caller = new CloudflareWorkersAICaller({
+                accountId: config.cloudflareAi.accountId,
+                apiToken: config.cloudflareAi.credential.reveal(),
+                fetchImpl: deps.fetchImpl,
+            });
+        } else {
             throw new WorkerConfigError(
-                ['VONE_CF_ACCOUNT_ID', 'VONE_CF_AI_TOKEN'],
-                'no model caller configured; refusing to start without the free Workers AI route',
+                ['VONE_MODEL_ROUTE'],
+                'no model route configured; set VONE_OLLAMA_MODEL for the local route or VONE_CF_ACCOUNT_ID + VONE_CF_AI_TOKEN for Workers AI',
             );
         }
-        caller = new CloudflareWorkersAICaller({
-            accountId: config.cloudflareAi.accountId,
-            apiToken: config.cloudflareAi.credential.reveal(),
-            fetchImpl: deps.fetchImpl,
-        });
     }
 
     const gates = createDefaultGates();
@@ -74,7 +78,7 @@ export function createWorkerFromConfig(config: WorkerConfig, deps: WorkerDepende
     fs.mkdirSync(jobsRoot, { recursive: true });
     const sandbox = new VOneVFSSandbox(jobsRoot);
     const hydration = new VOneSessionHydrationEngine(workerSandbox, 'sessions');
-    const router = new ModelRouter(deps.routes ?? createDefaultRoutes(), gates, caller);
+    const router = new ModelRouter(deps.routes ?? routesFor(config), gates, caller);
     const hub = new VOneUnifiedHubAgent(sandbox, router);
     const executor = new VOneExecutor(hub, hydration, deps.executorOptions);
 
@@ -101,6 +105,28 @@ export function createWorkerFromConfig(config: WorkerConfig, deps: WorkerDepende
     });
 
     return { config, worker, router, executor, sandbox, workerSandbox };
+}
+
+/**
+ * Only the configured backend's free route plus the paid fallback, which
+ * PAID_BLOCKED=INVIOLABLE keeps unselectable. There is never a second free
+ * route to spill onto, so a failing backend fails the job instead of
+ * silently switching providers.
+ */
+function routesFor(config: WorkerConfig): ModelRoute[] {
+    const [cloudflareFree, paidFallback] = createDefaultRoutes();
+    if (config.modelRoute === 'ollama' && config.ollama) {
+        const local: ModelRoute = {
+            id: 'ollama-local',
+            tier: 'free',
+            model: config.ollama.model,
+            costPerMTokUsd: 0,
+            state: 'FREE_AVAILABLE',
+            neuronsUsedToday: 0,
+        };
+        return [local, paidFallback];
+    }
+    return [cloudflareFree, paidFallback];
 }
 
 /** loadWorkerConfig() runs first, so a missing token throws before anything touches the network. */

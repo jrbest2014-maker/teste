@@ -8,8 +8,9 @@
     "start": "node dist/vone_boot.js",
     "dev": "ts-node src/vone_boot.ts",
     "worker": "ts-node src/vone_worker_boot.ts",
-    "test": "ts-node src/core/vone_secret_redaction.test.ts && ts-node src/server/vone_model_router.test.ts && ts-node src/server/vone_cloudflare_caller.test.ts && ts-node src/core/vone_unified_hub_agent.test.ts && ts-node src/core/vone_agent_loop.test.ts && ts-node src/core/vone_session_hydration_engine.test.ts && ts-node src/server/vone_executor.test.ts && ts-node src/server/vone_master_worker.test.ts",
-    "demo": "ts-node src/vone_local_demo.ts"
+    "test": "ts-node src/core/vone_secret_redaction.test.ts && ts-node src/server/vone_model_router.test.ts && ts-node src/server/vone_cloudflare_caller.test.ts && ts-node src/core/vone_unified_hub_agent.test.ts && ts-node src/core/vone_agent_loop.test.ts && ts-node src/core/vone_session_hydration_engine.test.ts && ts-node src/server/vone_executor.test.ts && ts-node src/server/vone_master_worker.test.ts && ts-node src/vone_e2e_smoke.test.ts",
+    "demo": "ts-node src/vone_local_demo.ts",
+    "e2e:smoke": "ts-node src/vone_e2e_smoke.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

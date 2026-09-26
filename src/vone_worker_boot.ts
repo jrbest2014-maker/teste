@@ -6,8 +6,8 @@ import { WorkerConfigError, describeWorkerConfig } from './server/vone_worker_co
  * (VONE_EXECUTION_CONTRACT_R1, executor side). Separate from vone_boot.ts,
  * which is left untouched. All configuration comes from environment
  * variables (see vone_worker_config.ts); only a presence/absence view of
- * credentials is ever printed. NOTE: the HTTP wire format is a proposal and
- * has not been verified against the real Master.
+ * credentials is ever printed. It speaks the Master's VONE_WORKER_IDENTITY_R1
+ * wire; for a single verified pass use `npm run e2e:smoke` instead.
  */
 async function main(): Promise<void> {
     let composed;
