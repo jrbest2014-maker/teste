@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { VOneVFSSandbox } from '../core/vone_vfs_sandbox';
-import { VOneHydrationEngine } from '../core/vone_hydration_engine';
+import { VOneSessionHydrationEngine } from '../core/vone_session_hydration_engine';
 import { VOneUnifiedHubAgent } from '../core/vone_unified_hub_agent';
 import { VOneExecutor, type ExecutorOptions } from './vone_executor';
 import {
@@ -45,8 +45,9 @@ export interface ComposedWorker {
 /**
  * Wires Master -> worker -> {VOneExecutor -> VOneAgentLoop, ModelRouter}.
  * Layout under VONE_WORKER_ROOT (default cwd): the ledger lives at the root,
- * jobs run in `<root>/workspace` - a separate VOneVFSSandbox, so agent tools
- * (write_file etc.) cannot reach or rewrite the idempotency/evidence ledger.
+ * per-session checkpoints in `<root>/sessions`, and jobs run in
+ * `<root>/workspace` - a separate VOneVFSSandbox, so agent tools (write_file
+ * etc.) cannot reach or rewrite the ledger or any session's checkpoint.
  * Gates always come from createDefaultGates() and the very same object is
  * handed to both the router and the worker - there is no configuration
  * path (env or job) that loosens them.
@@ -72,7 +73,7 @@ export function createWorkerFromConfig(config: WorkerConfig, deps: WorkerDepende
     const jobsRoot = path.join(workerSandbox.getProjectRoot(), 'workspace');
     fs.mkdirSync(jobsRoot, { recursive: true });
     const sandbox = new VOneVFSSandbox(jobsRoot);
-    const hydration = new VOneHydrationEngine(sandbox);
+    const hydration = new VOneSessionHydrationEngine(workerSandbox, 'sessions');
     const router = new ModelRouter(deps.routes ?? createDefaultRoutes(), gates, caller);
     const hub = new VOneUnifiedHubAgent(sandbox, router);
     const executor = new VOneExecutor(hub, hydration, deps.executorOptions);
