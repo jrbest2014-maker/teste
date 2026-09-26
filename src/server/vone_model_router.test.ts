@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+    CloudflareWorkersAICaller,
     ModelRouter,
     RoutingBlockedError,
     createDefaultGates,
@@ -84,6 +85,71 @@ async function main(): Promise<void> {
         await router.dispatch({ prompt: 'first' }); // 12/20 -> still FREE_AVAILABLE
         await router.dispatch({ prompt: 'second' }); // 24/20 -> FREE_EXHAUSTED
         await assert.rejects(() => router.dispatch({ prompt: 'third' }), RoutingBlockedError);
+    }
+
+    // Cloudflare HTTP contract: validates request construction and parsing without network access.
+    {
+        const calls: Array<{ url: string; init?: RequestInit }> = [];
+        const fetchImpl: typeof fetch = async (input, init) => {
+            calls.push({ url: String(input), init });
+            return new Response(JSON.stringify({ success: true, result: { response: 'ok' } }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        };
+        const caller = new CloudflareWorkersAICaller({
+            accountId: 'acct-test',
+            apiToken: 'token-test',
+            fetchImpl,
+        });
+        const route = createDefaultRoutes()[0];
+        const result = await caller.run(route, { prompt: 'contract-check', maxTokens: 250 });
+        assert.equal(result.text, 'ok');
+        assert.equal(result.neuronsUsed, 3);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].url, `https://api.cloudflare.com/client/v4/accounts/acct-test/ai/run/${route.model}`);
+        assert.equal(calls[0].init?.method, 'POST');
+        const headers = calls[0].init?.headers as Record<string, string>;
+        assert.equal(headers.Authorization, 'Bearer token-test');
+        assert.equal(headers['Content-Type'], 'application/json');
+        assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+            messages: [{ role: 'user', content: 'contract-check' }],
+            max_tokens: 250,
+        });
+    }
+
+    // Default token budget and error contracts remain fail-closed.
+    {
+        const route = createDefaultRoutes()[0];
+        let body = '';
+        const okFetch: typeof fetch = async (_input, init) => {
+            body = String(init?.body);
+            return new Response(JSON.stringify({ success: true, result: { response: 'default-ok' } }), { status: 200 });
+        };
+        const caller = new CloudflareWorkersAICaller({ accountId: 'a', apiToken: 't', fetchImpl: okFetch });
+        const result = await caller.run(route, { prompt: 'default-budget' });
+        assert.equal(JSON.parse(body).max_tokens, 512);
+        assert.equal(result.neuronsUsed, 6);
+
+        const httpFail: typeof fetch = async () => new Response('denied', { status: 403 });
+        await assert.rejects(
+            () => new CloudflareWorkersAICaller({ accountId: 'a', apiToken: 't', fetchImpl: httpFail }).run(route, { prompt: 'x' }),
+            /HTTP 403/,
+        );
+
+        const apiFail: typeof fetch = async () =>
+            new Response(JSON.stringify({ success: false, errors: [{ message: 'bad request' }] }), { status: 200 });
+        await assert.rejects(
+            () => new CloudflareWorkersAICaller({ accountId: 'a', apiToken: 't', fetchImpl: apiFail }).run(route, { prompt: 'x' }),
+            /bad request/,
+        );
+
+        const emptySuccess: typeof fetch = async () =>
+            new Response(JSON.stringify({ success: true, result: {} }), { status: 200 });
+        await assert.rejects(
+            () => new CloudflareWorkersAICaller({ accountId: 'a', apiToken: 't', fetchImpl: emptySuccess }).run(route, { prompt: 'x' }),
+            /unknown error/,
+        );
     }
 
     console.log('vone_model_router: all assertions passed');
