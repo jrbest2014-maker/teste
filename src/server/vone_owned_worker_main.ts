@@ -7,7 +7,11 @@ import { VOneExecutor } from './vone_executor';
 import { ModelRouter, createDefaultGates } from './vone_model_router';
 import { OllamaModelCaller } from './vone_ollama_caller';
 import { VOneMasterWorkerHttpClient } from './vone_master_worker_client';
-import { VOneOwnedExecutorWorker } from './vone_owned_executor_worker';
+import { VOneDualWorker } from './vone_dual_worker';
+import { VOneInferenceFailoverExecutor } from './vone_inference_failover_executor';
+import { BudgetedInferenceRouter } from './vone_budgeted_inference_router';
+import { NeuronBudgetManager } from './vone_neuron_budget';
+import { CloudflareInferenceBackend, OllamaInferenceBackend } from './vone_inference_backends';
 import {
     assertVerifiedCapacitySnapshot,
     modelRouteFromCapacitySnapshot,
@@ -42,23 +46,34 @@ async function main(): Promise<void> {
         maxSnapshotAgeMs: 120_000,
     } as const;
 
-    const worker = new VOneOwnedExecutorWorker({
+    const neuronBudget = new NeuronBudgetManager(10_000, 500);
+    const budgetRouter = new BudgetedInferenceRouter(neuronBudget);
+    const cloudEndpoint = process.env.VONE_CLOUD_INFERENCE_URL?.trim() || 'https://v-one-cloud-inference-r1.vone-technology.workers.dev/infer';
+    const cloudBackend = new CloudflareInferenceBackend(cloudEndpoint, process.env.VONE_INFERENCE_TOKEN?.trim());
+    const localBackend = new OllamaInferenceBackend('http://127.0.0.1:11434', model);
+    const inferenceExecutor = new VOneInferenceFailoverExecutor(budgetRouter, cloudBackend, localBackend);
+
+    const worker = new VOneDualWorker({
         workerId,
         master,
+        inferenceExecutor,
         heartbeatDetails: {
-            backend: 'ollama',
-            provider: 'ollama',
+            backend: 'cloudflare+ollama',
+            provider: 'v-one',
             model,
-            route_source: 'VONE_MASTER_CAPACITY_SNAPSHOT_ONLY',
+            route_source: 'VONE_MASTER_CAPACITY_AND_BUDGET',
+            cloud_auth_configured: Boolean(process.env.VONE_INFERENCE_TOKEN?.trim()),
         },
-        capacityValidation,
-        executorFactory: async (request) => {
-            const snapshot = request.capacity_snapshot;
-            assertVerifiedCapacitySnapshot(snapshot, capacityValidation);
-            const route = modelRouteFromCapacitySnapshot(snapshot, model);
-            const router = new ModelRouter([route], gates, ollamaCaller);
-            const hub = new VOneUnifiedHubAgent(sandbox, router);
-            return new VOneExecutor(hub, hydration);
+        ownedExecutor: {
+            capacityValidation,
+            executorFactory: async (request) => {
+                const snapshot = request.capacity_snapshot;
+                assertVerifiedCapacitySnapshot(snapshot, capacityValidation);
+                const route = modelRouteFromCapacitySnapshot(snapshot, model);
+                const router = new ModelRouter([route], gates, ollamaCaller);
+                const hub = new VOneUnifiedHubAgent(sandbox, router);
+                return new VOneExecutor(hub, hydration);
+            },
         },
     });
 
