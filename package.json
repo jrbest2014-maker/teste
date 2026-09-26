@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/vone_boot.js",
     "dev": "ts-node src/vone_boot.ts",
-    "test": "ts-node src/core/vone_secret_redaction.test.ts && ts-node src/server/vone_model_router.test.ts && ts-node src/core/vone_unified_hub_agent.test.ts && ts-node src/core/vone_agent_loop.test.ts && ts-node src/server/vone_executor.test.ts && ts-node src/server/vone_capacity_snapshot.test.ts && ts-node src/server/vone_owned_executor_worker.test.ts && ts-node src/server/vone_worker_identity.test.ts && ts-node src/server/vone_local_control_plane_e2e.test.ts && ts-node src/server/vone_cloud_inference_policy.test.ts",
+    "test": "ts-node src/core/vone_secret_redaction.test.ts && ts-node src/server/vone_model_router.test.ts && ts-node src/core/vone_unified_hub_agent.test.ts && ts-node src/core/vone_agent_loop.test.ts && ts-node src/server/vone_executor.test.ts && ts-node src/server/vone_capacity_snapshot.test.ts && ts-node src/server/vone_owned_executor_worker.test.ts && ts-node src/server/vone_worker_identity.test.ts && ts-node src/server/vone_local_control_plane_e2e.test.ts && ts-node src/server/vone_cloud_inference_policy.test.ts && ts-node src/server/vone_neuron_budget.test.ts",
     "cf:dry-run": "wrangler deploy --dry-run --outdir .wrangler-dry-run",
     "cf:deploy": "wrangler deploy",
     "cf:preview": "wrangler preview"

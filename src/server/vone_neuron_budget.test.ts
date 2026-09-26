@@ -1,0 +1,22 @@
+﻿import * as assert from 'node:assert';
+import { NeuronBudgetManager } from './vone_neuron_budget';
+
+const day1 = new Date('2026-09-26T12:00:00Z');
+const budget = new NeuronBudgetManager(10_000, 500, day1);
+assert.equal(budget.snapshot(day1).limit, 10_000);
+assert.equal(budget.snapshot(day1).availableForDispatch, 9_500);
+assert.equal(budget.canDispatch(9_500, day1), true);
+assert.equal(budget.canDispatch(9_501, day1), false);
+budget.recordActual(9_000, day1);
+assert.equal(budget.snapshot(day1).state, 'FREE_QUOTA_LOW');
+assert.equal(budget.canDispatch(501, day1), false);
+budget.recordActual(500, day1);
+assert.equal(budget.snapshot(day1).state, 'FREE_EXHAUSTED');
+assert.equal(budget.canDispatch(1, day1), false);
+const day2 = new Date('2026-09-27T00:00:01Z');
+assert.equal(budget.snapshot(day2).used, 0);
+assert.equal(budget.snapshot(day2).state, 'FREE_AVAILABLE');
+budget.markExhausted(day2);
+assert.equal(budget.snapshot(day2).used, 10_000);
+assert.equal(budget.snapshot(day2).state, 'FREE_EXHAUSTED');
+console.log('vone_neuron_budget: all assertions passed');
