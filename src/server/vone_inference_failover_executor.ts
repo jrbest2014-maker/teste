@@ -1,6 +1,6 @@
-﻿import { createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { BudgetedInferenceRouter } from './vone_budgeted_inference_router';
-import { InferenceCapacity } from './vone_cloud_inference_policy';
+import { CloudInferenceBlockedError, InferenceCapacity } from './vone_cloud_inference_policy';
 
 export interface InferenceBackendResult {
   readonly text: string;
@@ -47,7 +47,10 @@ export class VOneInferenceFailoverExecutor {
         }
         this.router.recordCloudUsage(out.neurons, now);
         return this.result('DONE', 'CLOUD_FREE', decision.reason, out);
-      } catch {
+      } catch (error) {
+        if (error instanceof CloudInferenceBlockedError && error.code === 'CLOUD_FREE_EXHAUSTED') {
+          this.router.markCloudFreeExhausted(now);
+        }
         if (args.capacity.desktop === 'ONLINE') {
           const out = await this.local.run(args.prompt, args.maxTokens ?? 512);
           return this.result('DONE', 'DESKTOP_LOCAL', 'cloud_execution_failed_local_fallback', out);

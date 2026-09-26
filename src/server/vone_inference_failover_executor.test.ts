@@ -2,6 +2,7 @@
 import { NeuronBudgetManager } from './vone_neuron_budget';
 import { BudgetedInferenceRouter } from './vone_budgeted_inference_router';
 import { VOneInferenceFailoverExecutor, InferenceBackend } from './vone_inference_failover_executor';
+import { CloudInferenceBlockedError } from './vone_cloud_inference_policy';
 
 async function main(): Promise<void> {
   const now = new Date('2026-09-26T12:00:00Z');
@@ -27,6 +28,15 @@ async function main(): Promise<void> {
   const e = await new VOneInferenceFailoverExecutor(new BudgetedInferenceRouter(new NeuronBudgetManager(10_000,500,now)), missingUsage, local).execute({ prompt: 'x', estimatedNeurons: 1, capacity: { cloud: 'FREE_AVAILABLE', desktop: 'ONLINE' }, now });
   assert.equal(e.status, 'HOLD'); assert.equal(e.reason, 'cloud_usage_missing_fail_closed');
   assert.match(a.evidenceSha256, /^[a-f0-9]{64}$/);
+
+  const quotaBudget = new NeuronBudgetManager(10_000, 500, now);
+  const quotaCloud: InferenceBackend = { run: async () => {
+    throw new CloudInferenceBlockedError('CLOUD_FREE_EXHAUSTED', 'free quota exhausted');
+  }};
+  const quotaExec = new VOneInferenceFailoverExecutor(new BudgetedInferenceRouter(quotaBudget), quotaCloud, local);
+  const f = await quotaExec.execute({ prompt: 'x', estimatedNeurons: 1, capacity: { cloud: 'FREE_AVAILABLE', desktop: 'ONLINE' }, now });
+  assert.equal(f.target, 'DESKTOP_LOCAL');
+  assert.equal(quotaBudget.snapshot(now).state, 'FREE_EXHAUSTED');
   console.log('vone_inference_failover_executor: all assertions passed');
 }
 main().catch((error) => { console.error(error); process.exit(1); });
