@@ -1,3 +1,5 @@
+import type { VOneCapacitySnapshotR1 } from './vone_capacity_snapshot';
+
 export type VOneExecutionStatus = 'DONE' | 'BLOCKED' | 'FAILED' | 'INCOMPLETE';
 
 export interface VOneExecutionContractRequest {
@@ -7,13 +9,14 @@ export interface VOneExecutionContractRequest {
     readonly checkpoint_revision: number;
     readonly objective: string;
     readonly idempotency_key: string;
-    readonly capacity_snapshot?: Readonly<Record<string, unknown>> | null;
+    readonly capacity_snapshot?: VOneCapacitySnapshotR1 | null;
 }
 
 export interface VOneExecutionEvidence {
     readonly executor: 'VOneExecutor';
     readonly session_id: string;
     readonly artifact_count: number;
+    readonly local_checkpoint_revision: number;
 }
 
 export interface VOneExecutionContractResult {

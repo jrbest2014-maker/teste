@@ -54,7 +54,7 @@ export class RoutingBlockedError extends Error {
 
 const DEFAULT_DAILY_NEURON_HARD_CAP = 5000;
 const QUOTA_LOW_THRESHOLD = 0.9;
-const SELECTABLE_STATES: ReadonlySet<RouteState> = new Set(['FREE_AVAILABLE', 'FREE_QUEUE']);
+const SELECTABLE_STATES: ReadonlySet<RouteState> = new Set(['FREE_AVAILABLE', 'FREE_QUEUE', 'FREE_QUOTA_LOW']);
 
 /**
  * Routes inference requests across model tiers while enforcing V-ONE's
