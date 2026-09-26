@@ -53,16 +53,14 @@ async function main(): Promise<void> {
         );
 
         const jobs = [
-            { id: 'executor', capability: 'vone_executor_execute', payload: { session_id: 'demo-session', objective: 'escrever relatorio.txt' } },
-            { id: 'inferencia', capability: 'vone_inference_execute', payload: { prompt: 'diga oi', max_tokens: 64 } },
-            { id: 'saida-fisica', capability: 'vone_inference_execute', payload: { prompt: 'mover extrusora', requires_physical_output: true } },
-            { id: 'capability-desconhecida', capability: 'vone_rm_rf', payload: {} },
+            { id: 'executor', toolName: 'vone_executor_execute', args: { session_id: 'demo-session', objective: 'escrever relatorio.txt' } },
+            { id: 'inferencia', toolName: 'vone_inference_execute', args: { prompt: 'diga oi', max_tokens: 64 } },
+            { id: 'saida-fisica', toolName: 'vone_inference_execute', args: { prompt: 'mover extrusora', requires_physical_output: true } },
+            { id: 'tool-desconhecida', toolName: 'vone_rm_rf', args: {} },
         ];
-        for (const job of jobs) {
-            master.enqueue({ job_id: `job-${job.id}`, task_id: `task-${job.id}`, idempotency_key: `idem-${job.id}`, capability: job.capability, payload: job.payload });
-        }
+        for (const job of jobs) master.enqueue({ id: `job-${job.id}`, toolName: job.toolName, args: job.args });
 
-        console.log('SIMULACAO LOCAL: Master mock em processo + respostas de modelo roteirizadas. Sem rede, sem custo.\n');
+        console.log('SIMULACAO LOCAL: Master mock (fio VONE_WORKER_IDENTITY_R1) + respostas de modelo roteirizadas. Sem rede, sem custo.\n');
         const run = async (label: string) => {
             const before = caller.callCount;
             const outcome = await worker.runOnce();
@@ -74,21 +72,20 @@ async function main(): Promise<void> {
         };
 
         for (const job of jobs) await run(`job-${job.id}`);
-        master.redeliver('job-executor');
+        master.requeue('job-executor');
         await run('job-executor (reentrega)');
         await run('fila vazia');
 
-        console.log('\nEvidencias aceitas pelo Master:');
-        for (const result of master.acceptedResults) {
-            const extra =
-                result.output.kind === 'blocked'
-                    ? ` gate=${result.output.category}`
-                    : result.evidence.artifact_hashes.length
-                      ? ` artefato_sha256=${result.evidence.artifact_hashes[0].slice(0, 16)}...`
-                      : '';
-            console.log(`  ${result.job_id.padEnd(30)} ${result.status.padEnd(9)} ${result.evidence.verdict.padEnd(5)} replay=${result.replayed}${extra}`);
+        console.log('\nO que o Master recebeu em POST /api/worker/result:');
+        for (const body of master.acceptedResults) {
+            if ('result' in body) {
+                const { status, evidence, replayed } = body.result;
+                const artifact = evidence.artifact_hashes.length ? ` artefato_sha256=${evidence.artifact_hashes[0].slice(0, 16)}...` : '';
+                console.log(`  ${body.jobId.padEnd(26)} result: ${status} ${evidence.verdict} replay=${replayed}${artifact}`);
+            } else {
+                console.log(`  ${body.jobId.padEnd(26)} error:  ${body.error.replace(/ \[output_sha256=.*\]$/, '')}`);
+            }
         }
-        console.log(`\ncheckpoint do Master: revisao ${master.checkpointRevision}`);
     } finally {
         fs.rmSync(root, { recursive: true, force: true });
     }

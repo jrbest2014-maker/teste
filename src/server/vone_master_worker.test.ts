@@ -17,14 +17,23 @@ import {
     type RoutingGates,
 } from './vone_model_router';
 import {
+    EXECUTION_CONTRACT_VERSION,
+    R1_HTTP_PATHS,
     REQUIRED_GATES,
     SUPPORTED_CAPABILITIES,
     TransportError,
+    WORKER_AUTH_MARKER,
+    parseR1ClaimResponse,
     type BlockedJobOutput,
-    type ErrorJobOutput,
+    type ClaimResponse,
     type ExecutorJobOutput,
+    type HeartbeatResponse,
     type InferenceJobOutput,
+    type JobEnvelope,
     type MasterTransport,
+    type R1ResultBody,
+    type R1ResultPayload,
+    type ResultAck,
 } from './vone_execution_contract';
 import {
     InMemoryResultLedger,
@@ -42,17 +51,19 @@ import {
     loadWorkerConfig,
 } from './vone_worker_config';
 import { createWorkerFromConfig, createWorkerFromEnv } from './vone_worker_factory';
-import { InProcessMasterTransport, MockMaster, startMockMasterServer } from './testing/vone_mock_master';
+import { InProcessMasterTransport, MockMaster, startMockMasterServer, type MockJobSpec } from './testing/vone_mock_master';
 
 /**
- * Executor-side integration tests for VONE_EXECUTION_CONTRACT_R1 against a
- * LOCAL mock Master (in-process and real HTTP on 127.0.0.1). No external
- * network, no real credential: the tokens below are obviously fake and the
- * final block proves they never reach logs, results or the ledger.
+ * Executor-side tests for VONE_EXECUTION_CONTRACT_R1 over the Master's
+ * VONE_WORKER_IDENTITY_R1 wire, against a LOCAL mock Master that speaks that
+ * wire (in-process through the same adapters as HTTP, and real HTTP on
+ * 127.0.0.1). No external network, no real credential: the tokens below are
+ * obviously fake and the final block proves they never leak.
  */
 
 const FAKE_TOKEN = 'FAKE-TEST-TOKEN-not-a-real-secret-0000';
 const WRONG_TOKEN = 'FAKE-WRONG-TOKEN-not-a-real-secret-1111';
+const NOT_OWNED = 'JOB_NOT_OWNED_OR_NOT_CLAIMED';
 
 const allLogs: WorkerLogEvent[] = [];
 const allOutcomes: TickOutcome[] = [];
@@ -146,8 +157,8 @@ function makeWorker(workerId: string, transport: MasterTransport, stack: Stack, 
     });
 }
 
-function newMaster(options: { leaseMs?: number } = {}): MockMaster {
-    const master = new MockMaster({ expectedToken: FAKE_TOKEN, leaseMs: options.leaseMs });
+function newMaster(): MockMaster {
+    const master = new MockMaster({ expectedToken: FAKE_TOKEN });
     allMasters.push(master);
     return master;
 }
@@ -158,17 +169,41 @@ async function tick(worker: VOneMasterWorker): Promise<TickOutcome> {
     return outcome;
 }
 
-function inferenceJob(id: string, payload: Record<string, unknown> = { prompt: 'say hi', max_tokens: 64 }) {
-    return { job_id: `job-${id}`, task_id: `task-${id}`, idempotency_key: `idem-${id}`, capability: 'vone_inference_execute', payload };
+function inferenceJob(id: string, args: Record<string, unknown> = { prompt: 'say hi', max_tokens: 64 }): MockJobSpec {
+    return { id: `job-${id}`, toolName: 'vone_inference_execute', args };
 }
-function executorJob(id: string, objective = 'write the result file') {
-    return {
-        job_id: `job-${id}`,
-        task_id: `task-${id}`,
-        idempotency_key: `idem-${id}`,
-        capability: 'vone_executor_execute',
-        payload: { session_id: `session-${id}`, objective },
+function executorJob(id: string, objective = 'write the result file'): MockJobSpec {
+    return { id: `job-${id}`, toolName: 'vone_executor_execute', args: { session_id: `session-${id}`, objective } };
+}
+
+/** The `result` of a DONE submission; fails the test if the body is an `error`. */
+function resultOf(body: R1ResultBody | undefined): R1ResultPayload {
+    assert.ok(body && 'result' in body, `expected a {jobId, workerId, result} body, got ${JSON.stringify(body)}`);
+    return body.result;
+}
+
+/** The `error` text of a non-DONE submission; fails the test if the body is a `result`. */
+function errorOf(body: R1ResultBody | undefined): string {
+    assert.ok(body && 'error' in body, `expected a {jobId, workerId, error} body, got ${JSON.stringify(body)}`);
+    return body.error;
+}
+
+/** Hands the worker one internal envelope directly - for guards the R1 adapter can never trigger. */
+function internalTransport(job: JobEnvelope): MasterTransport & { submits: number } {
+    const transport = {
+        submits: 0,
+        async heartbeat(): Promise<HeartbeatResponse> {
+            return { ok: true, generation: null };
+        },
+        async claim(): Promise<ClaimResponse> {
+            return { job };
+        },
+        async submitResult(): Promise<ResultAck> {
+            transport.submits += 1;
+            return { accepted: true };
+        },
     };
+    return transport;
 }
 
 async function main(): Promise<void> {
@@ -181,8 +216,43 @@ async function main(): Promise<void> {
 
     try {
         // ------------------------------------------------------------------
-        // 1. Empty claim: heartbeat advertises capabilities + strict gates,
-        //    nothing is executed and nothing is submitted.
+        // 0. The R1 adapter reads only R1 fields: extra lease/owner/idempotency
+        //    fields a Master might add are ignored, never trusted.
+        // ------------------------------------------------------------------
+        {
+            const claimed = parseR1ClaimResponse(
+                {
+                    ok: true,
+                    auth: WORKER_AUTH_MARKER,
+                    job: {
+                        id: 'job-x',
+                        toolName: 'vone_inference_execute',
+                        args: { prompt: 'p' },
+                        createdAt: '2026-09-26T00:00:00Z',
+                        worker_id: 'someone-else',
+                        lease_id: 'forged-lease',
+                        lease_expires_at: 0,
+                        idempotency_key: 'forged-key',
+                    },
+                },
+                'worker-A',
+            );
+            assert.deepEqual(claimed.job, {
+                job_id: 'job-x',
+                task_id: 'job-x',
+                idempotency_key: 'job-x',
+                capability: 'vone_inference_execute',
+                worker_id: 'worker-A',
+                lease_id: 'r1:job-x',
+                lease_expires_at: Number.POSITIVE_INFINITY,
+                payload: { prompt: 'p' },
+            });
+        }
+
+        // ------------------------------------------------------------------
+        // 1. Empty claim: heartbeat carries {workerId, version, statusPayload}
+        //    with capabilities + strict gates; claim is {workerId}; nothing
+        //    is executed and nothing is submitted.
         // ------------------------------------------------------------------
         {
             const master = newMaster();
@@ -194,10 +264,18 @@ async function main(): Promise<void> {
             const outcome = await tick(worker);
             assert.deepEqual(outcome, { kind: 'idle' });
             assert.equal(master.heartbeats.length, 1);
-            assert.deepEqual(master.heartbeats[0].capabilities, [...SUPPORTED_CAPABILITIES]);
-            assert.deepEqual(master.heartbeats[0].capabilities, ['vone_executor_execute', 'vone_inference_execute']);
-            assert.deepEqual(master.heartbeats[0].gates, REQUIRED_GATES);
-            assert.equal(master.claims.length, 1);
+            assert.deepEqual(master.heartbeats[0], {
+                workerId: 'worker-A',
+                version: EXECUTION_CONTRACT_VERSION,
+                statusPayload: {
+                    status: 'IDLE',
+                    capabilities: ['vone_executor_execute', 'vone_inference_execute'],
+                    pending_results: 0,
+                    gates: REQUIRED_GATES,
+                },
+            });
+            assert.deepEqual(master.heartbeats[0].statusPayload.capabilities, [...SUPPORTED_CAPABILITIES]);
+            assert.deepEqual(master.claims, [{ workerId: 'worker-A' }]);
             assert.equal(transport.calls.submitResult, 0);
             assert.equal(stack.counts.execute + stack.counts.dispatch, 0);
             assert.equal(caller.callCount, 0);
@@ -232,7 +310,8 @@ async function main(): Promise<void> {
         }
 
         // ------------------------------------------------------------------
-        // 2. Executor job -> VOneExecutor -> VOneAgentLoop -> result + evidence.
+        // 2. Executor job -> VOneExecutor -> VOneAgentLoop -> {jobId, workerId,
+        //    result} with evidence.
         // ------------------------------------------------------------------
         {
             const master = newMaster();
@@ -255,10 +334,14 @@ async function main(): Promise<void> {
             assert.equal(outcome.replayed, false);
 
             assert.equal(master.acceptedResults.length, 1);
-            const submitted = master.acceptedResults[0];
-            assert.equal(submitted.worker_id, 'worker-A');
-            assert.equal(submitted.task_id, 'task-exec-1');
-            assert.equal(submitted.idempotency_key, 'idem-exec-1');
+            const body = master.acceptedResults[0];
+            assert.deepEqual(Object.keys(body).sort(), ['jobId', 'result', 'workerId']);
+            assert.equal(body.jobId, 'job-exec-1');
+            assert.equal(body.workerId, 'worker-A');
+            const submitted = resultOf(body);
+            assert.equal(submitted.status, 'DONE');
+            assert.equal(submitted.contract, EXECUTION_CONTRACT_VERSION);
+            assert.equal(submitted.idempotency_key, 'job-exec-1');
             assert.deepEqual(submitted.gates, REQUIRED_GATES);
             const output = submitted.output as ExecutorJobOutput;
             assert.equal(output.kind, 'executor');
@@ -273,13 +356,13 @@ async function main(): Promise<void> {
             assert.equal(stack.counts.execute, 1);
             assert.equal(stack.counts.dispatch, 0);
             assert.deepEqual(master.jobState('job-exec-1'), { state: 'DONE', owner: 'worker-A' });
-            const entry = ledger.get('idem-exec-1');
+            const entry = ledger.get('job-exec-1');
             assert.equal(entry?.state, 'SUBMITTED');
-            assert.equal(entry?.master_checkpoint_revision, 1);
+            assert.equal(entry?.master_checkpoint_revision, null, 'R1 acks carry no revision');
         }
 
         // NO_EVIDENCE_NO_PASS: an executor run that finishes without producing
-        // any artifact is DONE but HOLD, never PASS.
+        // any artifact is DONE but HOLD, never PASS - and the result says so.
         {
             const master = newMaster();
             const caller = new ScriptedCaller(['{"action":"finish","summary":"claimed success, no evidence"}']);
@@ -289,7 +372,9 @@ async function main(): Promise<void> {
             const outcome = await tick(worker);
             assert.equal(outcome.kind === 'completed' && outcome.status, 'DONE');
             assert.equal(outcome.kind === 'completed' && outcome.verdict, 'HOLD');
-            assert.equal(master.acceptedResults[0].evidence.verdict_reason, 'NO_EVIDENCE');
+            const submitted = resultOf(master.acceptedResults[0]);
+            assert.equal(submitted.evidence.verdict, 'HOLD');
+            assert.equal(submitted.evidence.verdict_reason, 'NO_EVIDENCE');
         }
 
         // ------------------------------------------------------------------
@@ -305,7 +390,7 @@ async function main(): Promise<void> {
             const outcome = await tick(worker);
             assert.equal(outcome.kind, 'completed');
             assert.equal(outcome.kind === 'completed' && outcome.verdict, 'PASS');
-            const output = master.acceptedResults[0].output as InferenceJobOutput;
+            const output = resultOf(master.acceptedResults[0]).output as InferenceJobOutput;
             assert.deepEqual(output, {
                 kind: 'inference',
                 text: 'inference-answer',
@@ -320,21 +405,21 @@ async function main(): Promise<void> {
         }
 
         // Gates are enforced by the router, not re-derived by the worker: each
-        // block becomes a BLOCKED result carrying RoutingBlockedError.category,
-        // with zero model calls - and nothing in the job can loosen a gate.
+        // block is reported as an `error` naming RoutingBlockedError.category,
+        // with zero model calls - and nothing in the args can loosen a gate.
         {
-            const cases: Array<{ name: string; routes: ModelRoute[]; payload: Record<string, unknown>; category: string }> = [
+            const cases: Array<{ name: string; routes: ModelRoute[]; args: Record<string, unknown>; category: string }> = [
                 {
                     name: 'paid',
                     routes: [paidRoute()],
-                    payload: { prompt: 'spend', gates: { paid_blocked: 'UNLOCKED' }, allow_paid: true, route: 'PAID' },
+                    args: { prompt: 'spend', gates: { paid_blocked: 'UNLOCKED' }, allow_paid: true, route: 'PAID' },
                     category: 'paidBlocked',
                 },
-                { name: 'unknown-cost', routes: [unknownCostRoute()], payload: { prompt: 'x' }, category: 'unknownCost' },
+                { name: 'unknown-cost', routes: [unknownCostRoute()], args: { prompt: 'x' }, category: 'unknownCost' },
                 {
                     name: 'physical',
                     routes: [freeRoute()],
-                    payload: { prompt: 'G1 X10', requires_physical_output: true, physical_output: 'UNLOCKED' },
+                    args: { prompt: 'G1 X10', requires_physical_output: true, physical_output: 'UNLOCKED' },
                     category: 'physicalOutputLocked',
                 },
             ];
@@ -343,17 +428,16 @@ async function main(): Promise<void> {
                 const caller = new ScriptedCaller(['must never be produced']);
                 const stack = makeStack(newRoot(`blocked-${testCase.name}`), caller, testCase.routes);
                 const worker = makeWorker('worker-A', new InProcessMasterTransport(master, FAKE_TOKEN), stack);
-                master.enqueue(inferenceJob(`blocked-${testCase.name}`, testCase.payload));
+                master.enqueue(inferenceJob(`blocked-${testCase.name}`, testCase.args));
 
                 const outcome = await tick(worker);
                 assert.equal(outcome.kind === 'completed' && outcome.status, 'BLOCKED', testCase.name);
                 assert.equal(outcome.kind === 'completed' && outcome.verdict, 'BLOCKED', testCase.name);
-                const output = master.acceptedResults[0].output as BlockedJobOutput;
-                assert.equal(output.kind, 'blocked');
-                assert.equal(output.category, testCase.category);
-                assert.equal(master.acceptedResults[0].evidence.verdict_reason, testCase.category);
+                const error = errorOf(master.acceptedResults[0]);
+                assert.match(error, /^BLOCKED verdict=BLOCKED/);
+                assert.ok(error.includes(testCase.category), `${testCase.name}: ${error}`);
+                assert.match(error, /output_sha256=[0-9a-f]{64}/);
                 assert.equal(caller.callCount, 0, `${testCase.name}: model must not be called`);
-                assert.deepEqual(master.acceptedResults[0].gates, REQUIRED_GATES);
             }
 
             // Same for the full executor path.
@@ -364,15 +448,15 @@ async function main(): Promise<void> {
             master.enqueue(executorJob('blocked-exec'));
             const outcome = await tick(worker);
             assert.equal(outcome.kind === 'completed' && outcome.verdict, 'BLOCKED');
-            const output = master.acceptedResults[0].output as ExecutorJobOutput;
-            assert.equal(output.agent_status, 'BLOCKED');
-            assert.equal(output.gate_decisions[0]?.category, 'paidBlocked');
+            const error = errorOf(master.acceptedResults[0]);
+            assert.match(error, /agent_status=BLOCKED/);
+            assert.match(error, /gates=paidBlocked/);
             assert.equal(caller.callCount, 0);
         }
 
         // ------------------------------------------------------------------
-        // 4. Errors: unknown capability, invalid payload, execution error,
-        //    malformed claim. Nothing unsupported/invalid is ever executed.
+        // 4. Errors: unknown toolName, invalid args, execution error, malformed
+        //    claim. Nothing unsupported/invalid is ever executed.
         // ------------------------------------------------------------------
         {
             const master = newMaster();
@@ -380,26 +464,27 @@ async function main(): Promise<void> {
             const stack = makeStack(newRoot('errors'), caller);
             const worker = makeWorker('worker-A', new InProcessMasterTransport(master, FAKE_TOKEN), stack);
 
-            master.enqueue({ ...inferenceJob('unknown-cap'), capability: 'vone_shell_execute' });
+            master.enqueue({ ...inferenceJob('unknown-tool'), toolName: 'vone_shell_execute' });
             let outcome = await tick(worker);
             assert.equal(outcome.kind === 'completed' && outcome.status, 'REJECTED');
             assert.equal(outcome.kind === 'completed' && outcome.verdict, 'FAIL');
-            let output = master.acceptedResults[0].output as ErrorJobOutput;
-            assert.equal(output.error_code, 'UNSUPPORTED_CAPABILITY');
-            assert.match(output.message, /vone_shell_execute/);
+            let error = errorOf(master.acceptedResults[0]);
+            assert.match(error, /^REJECTED verdict=FAIL/);
+            assert.match(error, /UNSUPPORTED_CAPABILITY/);
+            assert.match(error, /vone_shell_execute/);
 
-            master.enqueue({ ...executorJob('bad-payload'), payload: { session_id: 's' } });
+            master.enqueue({ ...executorJob('bad-args'), args: { session_id: 's' } });
             outcome = await tick(worker);
             assert.equal(outcome.kind === 'completed' && outcome.status, 'REJECTED');
-            output = master.acceptedResults[1].output as ErrorJobOutput;
-            assert.equal(output.error_code, 'INVALID_PAYLOAD');
-            assert.match(output.message, /objective/);
+            error = errorOf(master.acceptedResults[1]);
+            assert.match(error, /INVALID_PAYLOAD/);
+            assert.match(error, /objective/);
 
             assert.equal(stack.counts.execute, 0);
             assert.equal(stack.counts.dispatch, 0);
             assert.equal(caller.callCount, 0);
 
-            master.returnMalformedNextClaim();
+            master.overrideNext('claim', { status: 200, body: { ok: true, auth: WORKER_AUTH_MARKER, job: { id: 'broken' } } });
             outcome = await tick(worker);
             assert.equal(outcome.kind, 'protocol_error');
             assert.equal(outcome.kind === 'protocol_error' && outcome.phase, 'claim');
@@ -414,16 +499,17 @@ async function main(): Promise<void> {
             const outcome = await tick(worker);
             assert.equal(outcome.kind === 'completed' && outcome.status, 'FAILED');
             assert.equal(outcome.kind === 'completed' && outcome.verdict, 'FAIL');
-            const output = master.acceptedResults[0].output as ErrorJobOutput;
-            assert.equal(output.error_code, 'EXECUTION_ERROR');
-            assert.match(output.message, /upstream exploded/);
-            assert.match(output.message, /\[REDACTED\]/);
-            assert.ok(!output.message.includes('sk-THISLOOKSLIKEASECRET'), 'secret-shaped text must be redacted');
+            const error = errorOf(master.acceptedResults[0]);
+            assert.match(error, /^FAILED verdict=FAIL/);
+            assert.match(error, /EXECUTION_ERROR/);
+            assert.match(error, /upstream exploded/);
+            assert.match(error, /\[REDACTED\]/);
+            assert.ok(!error.includes('sk-THISLOOKSLIKEASECRET'), 'secret-shaped text must be redacted');
             assert.equal(caller.callCount, 1);
         }
 
         // ------------------------------------------------------------------
-        // 5. Idempotent retry.
+        // 5. Idempotent retry (idempotency is keyed by the R1 job id).
         // ------------------------------------------------------------------
         {
             const master = newMaster();
@@ -434,21 +520,24 @@ async function main(): Promise<void> {
             const worker = makeWorker('worker-A', transport, stack, ledger);
             master.enqueue(inferenceJob('idem'));
 
-            // 5a. Master applied the result but the ack was lost: the retry is
-            //     acknowledged as a duplicate, the job ran exactly once.
+            // 5a. The Master applied the result but the ack was lost. R1 has no
+            //     duplicate ack: the retry hits a job that is no longer CLAIMED
+            //     and gets 409. The job still ran exactly once and the worker
+            //     neither retries again nor re-executes.
             transport.dropNextAcks = 1;
             let outcome = await tick(worker);
-            assert.equal(outcome.kind, 'completed');
-            assert.equal(outcome.kind === 'completed' && outcome.duplicate, true);
-            assert.equal(outcome.kind === 'completed' && outcome.executed, true);
+            assert.equal(outcome.kind, 'result_rejected');
+            assert.equal(outcome.kind === 'result_rejected' && outcome.reason, NOT_OWNED);
+            assert.equal(outcome.kind === 'result_rejected' && outcome.executed, true);
             assert.equal(transport.calls.submitResult, 2);
             assert.equal(master.acceptedResults.length, 1);
-            assert.equal(master.duplicateResults.length, 1);
+            assert.equal(master.rejectedResults.length, 1);
             assert.equal(caller.callCount, 1);
+            assert.deepEqual(master.jobState('job-idem'), { state: 'DONE', owner: 'worker-A' });
 
-            // 5b. Master re-delivers the same idempotency_key under a new lease:
-            //     the stored result is resubmitted, nothing is re-executed.
-            master.redeliver('job-idem');
+            // 5b. The Master re-delivers the same job id: the stored result is
+            //     resubmitted, nothing is re-executed.
+            master.requeue('job-idem');
             outcome = await tick(worker);
             assert.equal(outcome.kind, 'completed');
             assert.equal(outcome.kind === 'completed' && outcome.executed, false);
@@ -456,8 +545,8 @@ async function main(): Promise<void> {
             assert.equal(caller.callCount, 1, 're-delivery must not re-run the model');
             assert.equal(stack.counts.dispatch, 1, 're-delivery must not re-dispatch');
             assert.equal(master.acceptedResults.length, 2);
-            const [firstResult, replayedResult] = master.acceptedResults;
-            assert.notEqual(firstResult.lease_id, replayedResult.lease_id);
+            const [firstResult, replayedResult] = master.acceptedResults.map(resultOf);
+            assert.equal(firstResult.replayed, false);
             assert.equal(replayedResult.replayed, true);
             assert.deepEqual(replayedResult.output, firstResult.output);
             assert.equal(replayedResult.evidence.output_sha256, firstResult.evidence.output_sha256);
@@ -532,6 +621,29 @@ async function main(): Promise<void> {
             assert.throws(() => createWorkerFromConfig(config, { fetchImpl: spyFetch }), WorkerConfigError);
             assert.equal(fetchCalls, 0);
 
+            // The exact request the transport sends: R1 path, Bearer auth,
+            // Content-Type, and nothing else - no contract header.
+            const seen: Array<{ url: string; headers: Record<string, string>; body: unknown }> = [];
+            const recordingFetch = (async (url: unknown, init?: RequestInit) => {
+                seen.push({
+                    url: String(url),
+                    headers: Object.fromEntries(new Headers(init?.headers).entries()),
+                    body: JSON.parse(String(init?.body)),
+                });
+                return new Response(JSON.stringify({ ok: true, job: null }), { status: 200 });
+            }) as unknown as typeof fetch;
+            const recording = new HttpMasterTransport({
+                baseUrl: 'https://master.example.invalid/',
+                credential: createWorkerCredential(FAKE_TOKEN),
+                fetchImpl: recordingFetch,
+            });
+            const idle = await recording.claim({ contract: EXECUTION_CONTRACT_VERSION, worker_id: 'worker-A', capabilities: [] });
+            assert.deepEqual(idle, { job: null });
+            assert.equal(seen[0].url, `https://master.example.invalid${R1_HTTP_PATHS.claim}`);
+            assert.deepEqual(Object.keys(seen[0].headers).sort(), ['authorization', 'content-type']);
+            assert.equal(seen[0].headers.authorization, `Bearer ${FAKE_TOKEN}`);
+            assert.deepEqual(seen[0].body, { workerId: 'worker-A' });
+
             // Transport error messages never echo the token, even if the
             // underlying error does.
             const echoingFetch = (async (_url: unknown, init?: RequestInit) => {
@@ -543,7 +655,7 @@ async function main(): Promise<void> {
                 fetchImpl: echoingFetch,
             });
             await assert.rejects(
-                () => echoTransport.claim({ contract: 'VONE_EXECUTION_CONTRACT_R1', worker_id: 'w', capabilities: [] }),
+                () => echoTransport.claim({ contract: EXECUTION_CONTRACT_VERSION, worker_id: 'w', capabilities: [] }),
                 (error: unknown) => {
                     assert.ok(error instanceof TransportError);
                     assert.equal(error.retryable, true);
@@ -576,14 +688,55 @@ async function main(): Promise<void> {
         }
 
         // ------------------------------------------------------------------
-        // 7. Ownership: result for a job this worker no longer owns; claim
-        //    envelope naming another worker; lease already expired.
+        // 6b. IDENTITY_R1 fail-closed: a response that does not prove this
+        //     worker's identity stops it before anything runs.
         // ------------------------------------------------------------------
         {
-            // 7a. Worker A's lease expires mid-execution and the Master hands
-            //     the job to worker B, which completes it. A's late result is
-            //     rejected WRONG_WORKER; A records it, does not retry and does
-            //     not re-execute.
+            const identityCases: Array<{ name: string; route: 'heartbeat' | 'claim'; body: unknown }> = [
+                { name: 'heartbeat for another worker', route: 'heartbeat', body: { ok: true, workerId: 'worker-Z', auth: WORKER_AUTH_MARKER, generation: 1 } },
+                { name: 'heartbeat without IDENTITY_R1', route: 'heartbeat', body: { ok: true, workerId: 'worker-A', auth: 'NONE', generation: 1 } },
+                {
+                    name: 'claimed job without IDENTITY_R1',
+                    route: 'claim',
+                    body: { ok: true, job: { id: 'job-noauth', toolName: 'vone_inference_execute', args: { prompt: 'x' } } },
+                },
+            ];
+            for (const testCase of identityCases) {
+                const master = newMaster();
+                const caller = new ScriptedCaller(['must never be produced']);
+                const stack = makeStack(newRoot(`identity-${testCase.route}-${master.heartbeats.length}-${allMasters.length}`), caller);
+                const transport = new InProcessMasterTransport(master, FAKE_TOKEN);
+                const worker = makeWorker('worker-A', transport, stack);
+                master.overrideNext(testCase.route, { status: 200, body: testCase.body });
+                const outcomes = await worker.run({ maxTicks: 3, idleDelayMs: 1 });
+                allOutcomes.push(...outcomes);
+                assert.equal(outcomes.length, 1, `${testCase.name}: must stop`);
+                assert.equal(outcomes[0].kind, 'auth_rejected', testCase.name);
+                assert.equal(caller.callCount, 0, testCase.name);
+                assert.equal(stack.counts.execute + stack.counts.dispatch, 0, testCase.name);
+                assert.equal(transport.calls.submitResult, 0, testCase.name);
+                if (testCase.route === 'heartbeat') assert.equal(transport.calls.claim, 0, `${testCase.name}: no claim`);
+            }
+
+            // ok:false on heartbeat is a protocol error, never a green light to claim.
+            const master = newMaster();
+            const transport = new InProcessMasterTransport(master, FAKE_TOKEN);
+            const worker = makeWorker('worker-A', transport, makeStack(newRoot('heartbeat-not-ok'), new ScriptedCaller(['x'])));
+            master.overrideNext('heartbeat', { status: 200, body: { ok: false, error: 'worker_disabled' } });
+            const outcome = await tick(worker);
+            assert.equal(outcome.kind, 'protocol_error');
+            assert.equal(outcome.kind === 'protocol_error' && outcome.phase, 'heartbeat');
+            assert.match(outcome.kind === 'protocol_error' ? outcome.error : '', /worker_disabled/);
+            assert.equal(transport.calls.claim, 0);
+        }
+
+        // ------------------------------------------------------------------
+        // 7. Ownership: the Master is the authority (HTTP 409).
+        // ------------------------------------------------------------------
+        {
+            // 7a. The Master re-queues the job while worker A is executing it
+            //     and worker B claims and completes it. A's late result gets
+            //     409; A records it, does not retry and does not re-execute.
             const master = newMaster();
             const transportA = new InProcessMasterTransport(master, FAKE_TOKEN);
             const transportB = new InProcessMasterTransport(master, FAKE_TOKEN);
@@ -593,7 +746,7 @@ async function main(): Promise<void> {
 
             let outcomeB: TickOutcome | null = null;
             const callerA = new ScriptedCaller(['answer-from-A'], async () => {
-                master.expireLease('job-owned');
+                master.requeue('job-owned');
                 outcomeB = await tick(workerB);
             });
             const stackA = makeStack(newRoot('owner-A'), callerA);
@@ -603,17 +756,16 @@ async function main(): Promise<void> {
 
             const outcome = await tick(workerA);
             const takeover = outcomeB as TickOutcome | null;
-            assert.equal(takeover?.kind === 'completed' && takeover.executed, true, 'worker B must take over the expired lease');
+            assert.equal(takeover?.kind === 'completed' && takeover.executed, true, 'worker B must take the re-queued job');
             assert.equal(callerB.callCount, 1);
             assert.equal(outcome.kind, 'result_rejected');
-            assert.equal(outcome.kind === 'result_rejected' && outcome.reason, 'WRONG_WORKER');
+            assert.equal(outcome.kind === 'result_rejected' && outcome.reason, NOT_OWNED);
             assert.equal(transportA.calls.submitResult, 1, 'an ownership rejection is not retried');
-            assert.equal(ledgerA.get('idem-owned')?.state, 'REJECTED_BY_MASTER');
+            assert.equal(ledgerA.get('job-owned')?.state, 'REJECTED_BY_MASTER');
             assert.equal(master.acceptedResults.length, 1);
-            assert.equal(master.acceptedResults[0].worker_id, 'worker-B');
-            assert.equal((master.acceptedResults[0].output as InferenceJobOutput).text, 'answer-from-B');
-            assert.equal(master.rejectedResults[0].reason, 'WRONG_WORKER');
-            assert.equal(master.rejectedResults[0].submission.worker_id, 'worker-A');
+            assert.equal(master.acceptedResults[0].workerId, 'worker-B');
+            assert.equal((resultOf(master.acceptedResults[0]).output as InferenceJobOutput).text, 'answer-from-B');
+            assert.equal(master.rejectedResults[0].workerId, 'worker-A');
             assert.deepEqual(master.jobState('job-owned'), { state: 'DONE', owner: 'worker-B' });
 
             const again = await tick(workerA);
@@ -621,48 +773,52 @@ async function main(): Promise<void> {
             assert.equal(transportA.calls.submitResult, 1, 'rejected result is not re-flushed');
             assert.equal(callerA.callCount, 1, 'rejected job is never re-executed');
 
-            // 7b. Mock-level check: a fabricated submission from a non-owner is refused.
-            const forged = { ...master.acceptedResults[0], worker_id: 'worker-A' };
+            // 7b. Mock-level: a result in another worker's name, and one for a
+            //     job nobody claimed, both get the R1 409 body.
+            const forged = { ...master.acceptedResults[0], workerId: 'worker-A' };
             const forgedResponse = master.handleResult(FAKE_TOKEN, forged);
             assert.equal(forgedResponse.status, 409);
-            assert.deepEqual(forgedResponse.body, { accepted: false, reason: 'WRONG_WORKER' });
+            assert.deepEqual(forgedResponse.body, { ok: false, error: 'job_not_owned_or_not_claimed' });
+            const unclaimed = master.handleResult(FAKE_TOKEN, { jobId: 'job-never-claimed', workerId: 'worker-A', error: 'x' });
+            assert.deepEqual(unclaimed, { status: 409, body: { ok: false, error: 'job_not_owned_or_not_claimed' } });
         }
         {
-            // 7c. A (buggy) Master hands this worker an envelope owned by someone else.
-            const master = newMaster();
-            const transport = new InProcessMasterTransport(master, FAKE_TOKEN);
+            // 7c. Worker-internal guards the R1 adapter can never trigger (it
+            //     always sets the claimant as owner and no lease). Kept as
+            //     defense in depth: an envelope owned by someone else, or with
+            //     an expired lease, is refused before anything runs.
             const caller = new ScriptedCaller(['must never be produced']);
-            const stack = makeStack(newRoot('foreign'), caller);
-            const worker = makeWorker('worker-A', transport, stack);
-            master.enqueue(inferenceJob('foreign'));
-            master.forceNextClaimOwner('worker-OTHER');
-            const outcome = await tick(worker);
-            assert.deepEqual(outcome, { kind: 'claim_refused', job_id: 'job-foreign', reason: 'FOREIGN_OWNER' });
+            const stack = makeStack(newRoot('internal-guards'), caller);
+            const base: JobEnvelope = {
+                job_id: 'job-guard',
+                task_id: 'job-guard',
+                idempotency_key: 'job-guard',
+                capability: 'vone_inference_execute',
+                worker_id: 'worker-A',
+                lease_id: 'r1:job-guard',
+                lease_expires_at: Number.POSITIVE_INFINITY,
+                payload: { prompt: 'x' },
+            };
+            const foreign = internalTransport({ ...base, worker_id: 'worker-OTHER' });
+            let outcome = await tick(makeWorker('worker-A', foreign, stack));
+            assert.deepEqual(outcome, { kind: 'claim_refused', job_id: 'job-guard', reason: 'FOREIGN_OWNER' });
+            const expired = internalTransport({ ...base, lease_expires_at: 0 });
+            outcome = await tick(makeWorker('worker-A', expired, stack));
+            assert.deepEqual(outcome, { kind: 'claim_refused', job_id: 'job-guard', reason: 'LEASE_EXPIRED' });
             assert.equal(caller.callCount, 0);
             assert.equal(stack.counts.dispatch + stack.counts.execute, 0);
-            assert.equal(transport.calls.submitResult, 0);
-        }
-        {
-            // 7d. Lease already expired when the claim arrives.
-            const master = newMaster({ leaseMs: -1 });
-            const transport = new InProcessMasterTransport(master, FAKE_TOKEN);
-            const caller = new ScriptedCaller(['must never be produced']);
-            const worker = makeWorker('worker-A', transport, makeStack(newRoot('expired'), caller));
-            master.enqueue(inferenceJob('expired'));
-            const outcome = await tick(worker);
-            assert.deepEqual(outcome, { kind: 'claim_refused', job_id: 'job-expired', reason: 'LEASE_EXPIRED' });
-            assert.equal(caller.callCount, 0);
-            assert.equal(transport.calls.submitResult, 0);
+            assert.equal(foreign.submits + expired.submits, 0);
         }
 
         // ------------------------------------------------------------------
-        // 8. Interruption / reconnection over real HTTP on 127.0.0.1, plus a
-        //    process restart that relies on the persisted ledger.
+        // 8. Interruption / reconnection over real HTTP on 127.0.0.1 (R1
+        //    paths), plus a process restart that relies on the persisted ledger.
         // ------------------------------------------------------------------
         {
             const master = newMaster();
             let server = await startMockMasterServer(master);
             const port = server.port;
+            const firstServer = server;
             const root = newRoot('http');
             const env = {
                 VONE_MASTER_URL: server.url,
@@ -721,13 +877,14 @@ async function main(): Promise<void> {
                 assert.deepEqual(outcome, { kind: 'idle' });
                 assert.equal(caller.callCount, 1);
                 assert.equal(master.acceptedResults.length, 1);
-                assert.equal(master.acceptedResults[0].replayed, true);
-                assert.equal((master.acceptedResults[0].output as InferenceJobOutput).text, 'http-answer');
+                const flushed = resultOf(master.acceptedResults[0]);
+                assert.equal(flushed.replayed, true);
+                assert.equal((flushed.output as InferenceJobOutput).text, 'http-answer');
                 assert.deepEqual(master.jobState('job-http'), { state: 'DONE', owner: 'worker-http' });
 
                 // Process restart: a brand-new worker over the same root reloads
-                // the ledger; a re-delivery of the same idempotency_key replays.
-                master.redeliver('job-http');
+                // the ledger; a re-delivery of the same job id replays.
+                master.requeue('job-http');
                 const freshCaller = new ScriptedCaller(['MUST-NOT-RUN-AFTER-RESTART']);
                 const restarted = createWorkerFromConfig(config, {
                     caller: freshCaller,
@@ -741,32 +898,45 @@ async function main(): Promise<void> {
                 assert.equal(outcome.kind === 'completed' && outcome.replayed, true);
                 assert.equal(freshCaller.callCount, 0);
                 assert.equal(master.acceptedResults.length, 2);
-                assert.equal((master.acceptedResults[1].output as InferenceJobOutput).text, 'http-answer');
-                assert.equal(server.requests.missingContractHeader, 0);
+                assert.equal((resultOf(master.acceptedResults[1]).output as InferenceJobOutput).text, 'http-answer');
+
+                // Only R1 paths were ever hit, and never with the old contract header.
+                const r1Paths = new Set<string>(Object.values(R1_HTTP_PATHS));
+                for (const requests of [firstServer.requests, server.requests]) {
+                    assert.ok(requests.paths.length > 0);
+                    for (const hit of requests.paths) assert.ok(r1Paths.has(hit), `unexpected path ${hit}`);
+                    assert.equal(requests.legacyContractHeader, 0);
+                }
 
                 // Jobs ran in <root>/workspace; the ledger sits outside that sandbox.
                 assert.equal(composed.sandbox.getProjectRoot(), fs.realpathSync(path.join(root, 'workspace')));
                 assert.throws(() => composed.sandbox.resolveSafePath('../.vone_worker_ledger.json'), /SECURITY VIOLATION/);
 
                 const reloaded = new SandboxResultLedger(new VOneVFSSandbox(root));
-                assert.equal(reloaded.get('idem-http')?.state, 'SUBMITTED');
-                assert.equal(reloaded.get('idem-http')?.master_checkpoint_revision, 2);
+                assert.equal(reloaded.get('job-http')?.state, 'SUBMITTED');
+                assert.equal(reloaded.get('job-http')?.master_checkpoint_revision, null);
             } finally {
                 await server.close();
             }
         }
 
         // ------------------------------------------------------------------
-        // 9. Neither fake token ever appears in logs, outcomes, anything the
-        //    Master received, or the persisted ledger.
+        // 9. No lease or contract-header assumption ever reaches the wire, and
+        //    neither fake token appears in logs, outcomes, anything the Master
+        //    received, or the persisted ledger.
         // ------------------------------------------------------------------
         {
+            const wire = JSON.stringify(
+                allMasters.map((master) => [master.heartbeats, master.claims, master.acceptedResults, master.rejectedResults]),
+            );
+            for (const legacy of ['lease_id', 'lease_expires_at', 'X-VOne-Contract', '/v1/execution', 'worker_id']) {
+                assert.ok(!wire.includes(legacy), `"${legacy}" must not appear on the R1 wire`);
+            }
+
             const haystacks = [
                 JSON.stringify(allLogs),
                 JSON.stringify(allOutcomes),
-                ...allMasters.map((master) =>
-                    JSON.stringify([master.heartbeats, master.claims, master.acceptedResults, master.duplicateResults, master.rejectedResults]),
-                ),
+                wire,
                 ...ledgerFiles.map((file) => fs.readFileSync(file, 'utf8')),
             ];
             assert.ok(allLogs.length > 10, 'expected worker logs to have been captured');
@@ -776,7 +946,7 @@ async function main(): Promise<void> {
             }
         }
 
-        console.log('vone_master_worker: all assertions passed (local mock Master only - wire format unverified against the real Master)');
+        console.log('vone_master_worker: all assertions passed (R1 wire, local mock Master - not yet run against the live preview)');
     } finally {
         fs.rmSync(tmpParent, { recursive: true, force: true });
     }

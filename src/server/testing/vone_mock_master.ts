@@ -1,53 +1,49 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { randomUUID } from 'node:crypto';
 import {
-    CONTRACT_HEADER,
-    EXECUTION_CONTRACT_VERSION,
-    PROPOSED_HTTP_PATHS,
+    R1_HTTP_PATHS,
+    R1_NOT_OWNED_ERROR,
     TransportError,
-    parseClaimResponse,
-    parseHeartbeatResponse,
-    parseResultAck,
+    WORKER_AUTH_MARKER,
+    claimToWire,
+    contractErrorToTransportError,
+    heartbeatToWire,
+    parseR1ClaimResponse,
+    parseR1HeartbeatResponse,
+    parseR1ResultResponse,
+    resultToWire,
     type ClaimRequest,
     type ClaimResponse,
     type HeartbeatRequest,
     type HeartbeatResponse,
-    type JobEnvelope,
     type MasterTransport,
+    type R1ClaimBody,
+    type R1HeartbeatBody,
+    type R1ResultBody,
     type ResultAck,
-    type ResultRejectionReason,
     type ResultSubmission,
 } from '../vone_execution_contract';
 
 /**
- * LOCAL MOCK of the V-ONE Master for tests only. It implements the PROPOSED
- * wire format from vone_execution_contract.ts - it is not evidence of how
- * the real Master behaves. It never makes network calls beyond binding a
- * loopback port in startMockMasterServer().
- *
- * Ownership rules it enforces on results: the job must exist, the submitting
- * worker must be the current lease owner (WRONG_WORKER otherwise), the lease
- * id must match (LEASE_MISMATCH) and the lease must not have expired
- * (LEASE_EXPIRED). A second submission of an already accepted result by the
- * same owner/lease is acknowledged as a duplicate, not re-applied.
+ * LOCAL MOCK of the V-ONE Master's VONE_WORKER_IDENTITY_R1 worker API, for
+ * tests only. It speaks the R1 wire exactly as specified (bodies, responses,
+ * the single 409 rejection) and models only what that spec states: a job is
+ * owned by whoever claimed it, and a result is accepted only from the owner
+ * of a job that is still CLAIMED. It never makes network calls beyond
+ * binding a loopback port in startMockMasterServer().
  */
 
 export interface MockJobSpec {
-    readonly job_id: string;
-    readonly task_id: string;
-    readonly idempotency_key: string;
-    readonly capability: string;
-    readonly payload: Record<string, unknown>;
+    readonly id: string;
+    readonly toolName: string;
+    readonly args: Record<string, unknown>;
 }
 
 interface MockJob {
-    spec: MockJobSpec;
+    readonly spec: MockJobSpec;
+    readonly createdAt: string;
     state: 'QUEUED' | 'CLAIMED' | 'DONE';
     owner: string | null;
-    lease_id: string | null;
-    lease_expires_at: number;
-    accepted: ResultSubmission | null;
 }
 
 export interface MockResponse {
@@ -55,70 +51,40 @@ export interface MockResponse {
     readonly body: unknown;
 }
 
-export interface MockMasterOptions {
-    readonly expectedToken: string;
-    readonly leaseMs?: number;
-    readonly now?: () => number;
-}
+export type MockRoute = 'heartbeat' | 'claim' | 'result';
 
 export class MockMaster {
-    public readonly heartbeats: HeartbeatRequest[] = [];
-    public readonly claims: ClaimRequest[] = [];
-    public readonly acceptedResults: ResultSubmission[] = [];
-    public readonly duplicateResults: ResultSubmission[] = [];
-    public readonly rejectedResults: Array<{ submission: ResultSubmission; reason: ResultRejectionReason }> = [];
+    public readonly heartbeats: R1HeartbeatBody[] = [];
+    public readonly claims: R1ClaimBody[] = [];
+    public readonly acceptedResults: R1ResultBody[] = [];
+    public readonly rejectedResults: R1ResultBody[] = [];
     public authFailures = 0;
-    public checkpointRevision = 0;
+    public generation = 0;
 
     private readonly jobs = new Map<string, MockJob>();
     private readonly order: string[] = [];
-    private readonly leaseMs: number;
-    private readonly now: () => number;
-    private forcedOwner: string | null = null;
-    private malformedNextClaim = false;
+    private readonly overrides = new Map<MockRoute, MockResponse>();
 
-    constructor(private readonly options: MockMasterOptions) {
-        this.leaseMs = options.leaseMs ?? 60_000;
-        this.now = options.now ?? Date.now;
-    }
+    constructor(private readonly options: { readonly expectedToken: string }) {}
 
     // ---- test controls ---------------------------------------------------
 
     public enqueue(spec: MockJobSpec): void {
-        this.jobs.set(spec.job_id, {
-            spec,
-            state: 'QUEUED',
-            owner: null,
-            lease_id: null,
-            lease_expires_at: 0,
-            accepted: null,
-        });
-        this.order.push(spec.job_id);
+        this.jobs.set(spec.id, { spec, createdAt: new Date(0).toISOString(), state: 'QUEUED', owner: null });
+        this.order.push(spec.id);
     }
 
-    /** Lease runs out: the job becomes claimable by anyone (owner kept until re-claimed). */
-    public expireLease(jobId: string): void {
-        const job = this.mustGet(jobId);
-        job.lease_expires_at = this.now() - 1;
-    }
-
-    /** Master-side retry: hand the same job (same idempotency_key) out again under a new lease. */
-    public redeliver(jobId: string): void {
+    /** The Master puts the same job id back in the queue (re-delivery / takeover by another worker). */
+    public requeue(jobId: string): void {
         const job = this.mustGet(jobId);
         job.state = 'QUEUED';
         job.owner = null;
-        job.lease_id = null;
-        job.lease_expires_at = 0;
         this.order.push(jobId);
     }
 
-    /** Next claim response names this worker_id as owner, whoever asked (buggy-Master simulation). */
-    public forceNextClaimOwner(workerId: string): void {
-        this.forcedOwner = workerId;
-    }
-
-    public returnMalformedNextClaim(): void {
-        this.malformedNextClaim = true;
+    /** The next response on `route` is `response` instead of the normal one (authorized requests only). */
+    public overrideNext(route: MockRoute, response: MockResponse): void {
+        this.overrides.set(route, response);
     }
 
     public jobState(jobId: string): { state: string; owner: string | null } {
@@ -126,83 +92,59 @@ export class MockMaster {
         return { state: job.state, owner: job.owner };
     }
 
-    // ---- protocol handlers (shared by in-process and HTTP transports) ---
+    // ---- R1 handlers (shared by the in-process and HTTP transports) -----
 
-    public handleHeartbeat(token: string | null, request: HeartbeatRequest): MockResponse {
-        if (!this.authorized(token)) return { status: 401, body: { error: 'unauthorized' } };
-        this.heartbeats.push(request);
-        return { status: 200, body: { ok: true } };
-    }
-
-    public handleClaim(token: string | null, request: ClaimRequest): MockResponse {
-        if (!this.authorized(token)) return { status: 401, body: { error: 'unauthorized' } };
-        if (request.contract !== EXECUTION_CONTRACT_VERSION) {
-            return { status: 400, body: { error: 'contract mismatch' } };
-        }
-        this.claims.push(request);
-
-        if (this.malformedNextClaim) {
-            this.malformedNextClaim = false;
-            return { status: 200, body: { contract: EXECUTION_CONTRACT_VERSION, job: { job_id: 'broken' } } };
-        }
-
-        const now = this.now();
-        let job: MockJob | undefined;
-        const queuedIndex = this.order.findIndex((jobId) => this.jobs.get(jobId)?.state === 'QUEUED');
-        if (queuedIndex >= 0) {
-            job = this.jobs.get(this.order[queuedIndex]);
-            this.order.splice(queuedIndex, 1);
-        } else {
-            // A lease that ran out makes the job claimable again by anyone.
-            job = [...this.jobs.values()].find((candidate) => candidate.state === 'CLAIMED' && candidate.lease_expires_at <= now);
-        }
-        if (job) {
-            job.state = 'CLAIMED';
-            job.owner = this.forcedOwner ?? request.worker_id;
-            this.forcedOwner = null;
-            job.lease_id = randomUUID();
-            job.lease_expires_at = now + this.leaseMs;
-            const envelope: JobEnvelope = {
-                job_id: job.spec.job_id,
-                task_id: job.spec.task_id,
-                idempotency_key: job.spec.idempotency_key,
-                capability: job.spec.capability,
-                worker_id: job.owner,
-                lease_id: job.lease_id,
-                lease_expires_at: job.lease_expires_at,
-                payload: job.spec.payload,
-            };
-            return { status: 200, body: { contract: EXECUTION_CONTRACT_VERSION, job: envelope } };
-        }
-        return { status: 200, body: { contract: EXECUTION_CONTRACT_VERSION, job: null } };
-    }
-
-    public handleResult(token: string | null, submission: ResultSubmission): MockResponse {
-        if (!this.authorized(token)) return { status: 401, body: { error: 'unauthorized' } };
-
-        const reject = (reason: ResultRejectionReason): MockResponse => {
-            this.rejectedResults.push({ submission, reason });
-            return { status: 409, body: { accepted: false, reason } };
+    public handleHeartbeat(token: string | null, body: R1HeartbeatBody): MockResponse {
+        if (!this.authorized(token)) return { status: 401, body: { ok: false, error: 'unauthorized' } };
+        this.heartbeats.push(body);
+        this.generation += 1;
+        return this.takeOverride('heartbeat') ?? {
+            status: 200,
+            body: { ok: true, workerId: body.workerId, auth: WORKER_AUTH_MARKER, generation: this.generation },
         };
+    }
 
-        if (submission.contract !== EXECUTION_CONTRACT_VERSION) return reject('CONTRACT_MISMATCH');
-        const job = this.jobs.get(submission.job_id);
-        if (!job) return reject('UNKNOWN_JOB');
-        if (job.owner !== submission.worker_id) return reject('WRONG_WORKER');
-        if (job.lease_id !== submission.lease_id) return reject('LEASE_MISMATCH');
+    public handleClaim(token: string | null, body: R1ClaimBody): MockResponse {
+        if (!this.authorized(token)) return { status: 401, body: { ok: false, error: 'unauthorized' } };
+        this.claims.push(body);
+        const override = this.takeOverride('claim');
+        if (override) return override;
 
-        if (job.state === 'DONE' && job.accepted) {
-            this.duplicateResults.push(submission);
-            return { status: 200, body: { accepted: true, duplicate: true, checkpoint_revision: this.checkpointRevision } };
+        const index = this.order.findIndex((jobId) => this.jobs.get(jobId)?.state === 'QUEUED');
+        if (index < 0) return { status: 200, body: { ok: true, job: null } };
+        const job = this.mustGet(this.order[index]);
+        this.order.splice(index, 1);
+        job.state = 'CLAIMED';
+        job.owner = body.workerId;
+        return {
+            status: 200,
+            body: {
+                ok: true,
+                job: { id: job.spec.id, toolName: job.spec.toolName, args: job.spec.args, createdAt: job.createdAt },
+                auth: WORKER_AUTH_MARKER,
+            },
+        };
+    }
+
+    public handleResult(token: string | null, body: R1ResultBody): MockResponse {
+        if (!this.authorized(token)) return { status: 401, body: { ok: false, error: 'unauthorized' } };
+        const override = this.takeOverride('result');
+        if (override) return override;
+
+        const job = this.jobs.get(body.jobId);
+        if (!job || job.state !== 'CLAIMED' || job.owner !== body.workerId) {
+            this.rejectedResults.push(body);
+            return { status: 409, body: { ok: false, error: R1_NOT_OWNED_ERROR } };
         }
-        if (job.lease_expires_at <= this.now()) return reject('LEASE_EXPIRED');
-        if (submission.idempotency_key !== job.spec.idempotency_key) return reject('LEASE_MISMATCH');
-
         job.state = 'DONE';
-        job.accepted = submission;
-        this.checkpointRevision += 1;
-        this.acceptedResults.push(submission);
-        return { status: 200, body: { accepted: true, checkpoint_revision: this.checkpointRevision } };
+        this.acceptedResults.push(body);
+        return { status: 200, body: { ok: true, jobId: body.jobId, auth: WORKER_AUTH_MARKER } };
+    }
+
+    private takeOverride(route: MockRoute): MockResponse | undefined {
+        const override = this.overrides.get(route);
+        this.overrides.delete(route);
+        return override;
     }
 
     private authorized(token: string | null): boolean {
@@ -219,8 +161,9 @@ export class MockMaster {
 }
 
 /**
- * In-process MasterTransport over a MockMaster. Every message is JSON
- * round-tripped and re-parsed with the contract parsers, like the HTTP path.
+ * In-process MasterTransport over a MockMaster. It uses the same R1
+ * adapters and parsers as HttpMasterTransport and JSON round-trips every
+ * message, so it exercises the real wire shapes minus the socket.
  * Fault injection: `offline` (every call fails as a retryable network
  * error), `failNextSubmits` (submit fails before reaching the Master) and
  * `dropNextAcks` (the Master applies the result but the ack is lost).
@@ -239,20 +182,15 @@ export class InProcessMasterTransport implements MasterTransport {
     public async heartbeat(request: HeartbeatRequest): Promise<HeartbeatResponse> {
         this.calls.heartbeat += 1;
         this.guardOnline();
-        const response = this.master.handleHeartbeat(this.token, roundTrip(request));
-        return parseHeartbeatResponse(this.unwrap(response));
+        const response = this.master.handleHeartbeat(this.token, roundTrip(heartbeatToWire(request)));
+        return parseOrThrow(() => parseR1HeartbeatResponse(this.unwrap(response), request.worker_id));
     }
 
     public async claim(request: ClaimRequest): Promise<ClaimResponse> {
         this.calls.claim += 1;
         this.guardOnline();
-        const response = this.master.handleClaim(this.token, roundTrip(request));
-        const body = this.unwrap(response);
-        try {
-            return parseClaimResponse(body);
-        } catch (error) {
-            throw new TransportError(error instanceof Error ? error.message : String(error), 'protocol', false);
-        }
+        const response = this.master.handleClaim(this.token, roundTrip(claimToWire(request)));
+        return parseOrThrow(() => parseR1ClaimResponse(this.unwrap(response), request.worker_id));
     }
 
     public async submitResult(submission: ResultSubmission): Promise<ResultAck> {
@@ -262,12 +200,12 @@ export class InProcessMasterTransport implements MasterTransport {
             this.failNextSubmits -= 1;
             throw new TransportError('connection reset before request was sent', 'network', true);
         }
-        const response = this.master.handleResult(this.token, roundTrip(submission));
+        const response = this.master.handleResult(this.token, roundTrip(resultToWire(submission)));
         if (this.dropNextAcks > 0) {
             this.dropNextAcks -= 1;
             throw new TransportError('connection reset while reading ack', 'network', true);
         }
-        return parseResultAck(this.unwrap(response, [409]));
+        return parseOrThrow(() => parseR1ResultResponse(response.status, this.unwrap(response, [409]), submission.job_id));
     }
 
     private guardOnline(): void {
@@ -285,6 +223,14 @@ export class InProcessMasterTransport implements MasterTransport {
     }
 }
 
+function parseOrThrow<T>(fn: () => T): T {
+    try {
+        return fn();
+    } catch (error) {
+        throw contractErrorToTransportError(error);
+    }
+}
+
 function roundTrip<T>(value: T): T {
     return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -294,14 +240,16 @@ export interface MockMasterServer {
     readonly port: number;
     /** Hard stop: closes the listener and drops every open connection. */
     close(): Promise<void>;
-    readonly requests: { count: number; missingContractHeader: number };
+    readonly requests: { count: number; paths: string[]; legacyContractHeader: number };
 }
 
-/** Real HTTP server for MockMaster, bound to 127.0.0.1 only. */
+/** Real HTTP server for MockMaster on the R1 paths, bound to 127.0.0.1 only. */
 export async function startMockMasterServer(master: MockMaster, port = 0): Promise<MockMasterServer> {
-    const requests = { count: 0, missingContractHeader: 0 };
+    const requests = { count: 0, paths: [] as string[], legacyContractHeader: 0 };
     const server = http.createServer((req, res) => {
         requests.count += 1;
+        requests.paths.push(req.url ?? '');
+        if (req.headers['x-vone-contract'] !== undefined) requests.legacyContractHeader += 1;
         const chunks: Buffer[] = [];
         req.on('data', (chunk: Buffer) => chunks.push(chunk));
         req.on('end', () => {
@@ -309,28 +257,24 @@ export async function startMockMasterServer(master: MockMaster, port = 0): Promi
                 res.writeHead(response.status, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(response.body));
             };
-            if (req.method !== 'POST') return send({ status: 405, body: { error: 'method' } });
-            if (req.headers[CONTRACT_HEADER.toLowerCase()] !== EXECUTION_CONTRACT_VERSION) {
-                requests.missingContractHeader += 1;
-                return send({ status: 400, body: { error: 'contract header' } });
-            }
+            if (req.method !== 'POST') return send({ status: 405, body: { ok: false, error: 'method' } });
             const auth = req.headers.authorization;
             const token = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null;
             let body: unknown;
             try {
                 body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
             } catch {
-                return send({ status: 400, body: { error: 'json' } });
+                return send({ status: 400, body: { ok: false, error: 'json' } });
             }
             switch (req.url) {
-                case PROPOSED_HTTP_PATHS.heartbeat:
-                    return send(master.handleHeartbeat(token, body as HeartbeatRequest));
-                case PROPOSED_HTTP_PATHS.claim:
-                    return send(master.handleClaim(token, body as ClaimRequest));
-                case PROPOSED_HTTP_PATHS.result:
-                    return send(master.handleResult(token, body as ResultSubmission));
+                case R1_HTTP_PATHS.heartbeat:
+                    return send(master.handleHeartbeat(token, body as R1HeartbeatBody));
+                case R1_HTTP_PATHS.claim:
+                    return send(master.handleClaim(token, body as R1ClaimBody));
+                case R1_HTTP_PATHS.result:
+                    return send(master.handleResult(token, body as R1ResultBody));
                 default:
-                    return send({ status: 404, body: { error: 'not found' } });
+                    return send({ status: 404, body: { ok: false, error: 'not found' } });
             }
         });
     });

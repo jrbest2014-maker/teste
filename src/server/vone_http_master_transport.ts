@@ -1,13 +1,14 @@
 import { redactSecrets } from '../core/vone_secret_redaction';
 import {
-    CONTRACT_HEADER,
-    ContractViolationError,
-    EXECUTION_CONTRACT_VERSION,
-    PROPOSED_HTTP_PATHS,
+    R1_HTTP_PATHS,
     TransportError,
-    parseClaimResponse,
-    parseHeartbeatResponse,
-    parseResultAck,
+    claimToWire,
+    contractErrorToTransportError,
+    heartbeatToWire,
+    parseR1ClaimResponse,
+    parseR1HeartbeatResponse,
+    parseR1ResultResponse,
+    resultToWire,
     type ClaimRequest,
     type ClaimResponse,
     type HeartbeatRequest,
@@ -28,8 +29,9 @@ export interface HttpMasterTransportOptions {
 const MAX_ERROR_BODY = 200;
 
 /**
- * MasterTransport over HTTP+JSON using the PROPOSED paths from
- * vone_execution_contract.ts (unverified against the real Master).
+ * MasterTransport for the Master's VONE_WORKER_IDENTITY_R1 worker API
+ * (`/api/worker/{heartbeat,claim,result}`, `Authorization: Bearer <token>`).
+ * All wire shapes and their validation live in vone_execution_contract.ts.
  *
  * This is the only component that ever calls credential.reveal(), and only
  * to build the Authorization header. Every error message it produces is
@@ -37,9 +39,10 @@ const MAX_ERROR_BODY = 200;
  * response body, plus a literal scrub of the token itself - so a Master
  * that echoes the header back still cannot leak it through an error.
  *
- * A result rejection is not an error: HTTP 409 with a JSON ResultAck body
- * is returned as `{accepted:false, reason}` so the worker can handle
- * ownership/lease rejections without treating them as retryable failures.
+ * HTTP 409 on /result is not an error: it is the Master's ownership
+ * rejection and is returned as `{accepted:false}` so the worker records it
+ * without retrying or re-executing. A response that does not prove
+ * IDENTITY_R1 surfaces as an auth failure, which stops the worker.
  */
 export class HttpMasterTransport implements MasterTransport {
     private readonly baseUrl: string;
@@ -56,29 +59,27 @@ export class HttpMasterTransport implements MasterTransport {
     }
 
     public async heartbeat(request: HeartbeatRequest): Promise<HeartbeatResponse> {
-        const { body } = await this.post(PROPOSED_HTTP_PATHS.heartbeat, request, []);
-        return this.parse(() => parseHeartbeatResponse(body));
+        const { body } = await this.post(R1_HTTP_PATHS.heartbeat, heartbeatToWire(request), []);
+        return this.parse(() => parseR1HeartbeatResponse(body, request.worker_id));
     }
 
     public async claim(request: ClaimRequest): Promise<ClaimResponse> {
-        const { status, body } = await this.post(PROPOSED_HTTP_PATHS.claim, request, [204]);
-        if (status === 204) return { contract: EXECUTION_CONTRACT_VERSION, job: null };
-        return this.parse(() => parseClaimResponse(body));
+        const { body } = await this.post(R1_HTTP_PATHS.claim, claimToWire(request), []);
+        return this.parse(() => parseR1ClaimResponse(body, request.worker_id));
     }
 
     public async submitResult(submission: ResultSubmission): Promise<ResultAck> {
-        const { body } = await this.post(PROPOSED_HTTP_PATHS.result, submission, [409]);
-        return this.parse(() => parseResultAck(body));
+        const wire = resultToWire(submission);
+        const payload = 'error' in wire ? { ...wire, error: this.scrub(wire.error) } : wire;
+        const { status, body } = await this.post(R1_HTTP_PATHS.result, payload, [409]);
+        return this.parse(() => parseR1ResultResponse(status, body, submission.job_id));
     }
 
     private parse<T>(fn: () => T): T {
         try {
             return fn();
         } catch (error) {
-            if (error instanceof ContractViolationError) {
-                throw new TransportError(this.scrub(error.message), 'protocol', false);
-            }
-            throw error;
+            throw contractErrorToTransportError(error, (message) => this.scrub(message));
         }
     }
 
@@ -96,7 +97,6 @@ export class HttpMasterTransport implements MasterTransport {
                 headers: {
                     Authorization: `Bearer ${this.options.credential.reveal()}`,
                     'Content-Type': 'application/json',
-                    [CONTRACT_HEADER]: EXECUTION_CONTRACT_VERSION,
                 },
                 body: JSON.stringify(payload),
                 signal: controller.signal,
@@ -114,14 +114,10 @@ export class HttpMasterTransport implements MasterTransport {
         }
 
         const status = response.status;
-        if (status === 204 && passThroughStatuses.includes(204)) {
-            return { status, body: null };
-        }
-
         let text = '';
         try {
             text = await response.text();
-        } catch (error) {
+        } catch {
             throw new TransportError(this.scrub(`${path}: failed reading body`), 'network', true, status);
         }
 

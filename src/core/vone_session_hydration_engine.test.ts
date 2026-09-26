@@ -142,11 +142,9 @@ async function main(): Promise<void> {
                 log: () => {},
             });
             master.enqueue({
-                job_id: 'job-s',
-                task_id: 'task-s',
-                idempotency_key: 'idem-s',
-                capability: 'vone_executor_execute',
-                payload: { session_id: 'session-factory', objective: 'write the result file' },
+                id: 'job-s',
+                toolName: 'vone_executor_execute',
+                args: { session_id: 'session-factory', objective: 'write the result file' },
             });
 
             const outcome = await composed.worker.runOnce();
