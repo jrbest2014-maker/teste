@@ -1,5 +1,6 @@
 interface WorkersAI { run(model: string, input: unknown): Promise<unknown>; }
-interface Env { AI: WorkersAI; VONE_INFERENCE_TOKEN?: string; VONE_SMOKE_TOKEN?: string; }
+interface MasterBinding { fetch(request: Request): Promise<Response>; }
+interface Env { AI: WorkersAI; VONE_MASTER?: MasterBinding; VONE_INFERENCE_TOKEN?: string; VONE_SMOKE_TOKEN?: string; }
 
 const MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct';
 const AUTHORITY_URL = 'https://vone-control-plane.vone-technology.workers.dev/api/status';
@@ -91,9 +92,16 @@ function reserveBudget(authority: AuthorityResult): AuthorityResult {
   if (available < authority.estimated_neurons) return { ...authority, reason: 'NEURON_BUDGET_AFTER_RESERVE_INSUFFICIENT' };
   locallyReservedNeurons += authority.estimated_neurons; return authority;
 }
-async function readAuthority(estimatedNeurons: number): Promise<AuthorityResult> {
+async function readAuthority(env: Env, estimatedNeurons: number): Promise<AuthorityResult> {
+  if (!env.VONE_MASTER) return authorityResponse('MASTER_UNAVAILABLE', estimatedNeurons);
   let response: Response;
-  try { response = await fetch(AUTHORITY_URL, { method: 'GET', headers: { accept: 'application/json', 'cache-control': 'no-cache' }, redirect: 'error', signal: AbortSignal.timeout(5_000) }); }
+  try {
+    const request = new Request(AUTHORITY_URL, {
+      method: 'GET', headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+      redirect: 'error', signal: AbortSignal.timeout(5_000),
+    });
+    response = await env.VONE_MASTER.fetch(request);
+  }
   catch { return authorityResponse('MASTER_UNAVAILABLE', estimatedNeurons); }
   if (!response.ok) return authorityResponse('MASTER_UNAVAILABLE', estimatedNeurons);
   let master: MasterStatus | null;
@@ -119,7 +127,7 @@ function holdResponse(authority: AuthorityResult, status = 503, protocol: 'VONE_
   return json({ ...(protocol === 'VONE_DELEGATE_AUTHORITY_R2' ? authority : {}), protocol, authority, status: 'HOLD', target: 'HOLD', reason: authority.reason }, status);
 }
 async function executeFree(env: Env, prompt: string, maxTokens: number, protocol: 'VONE_DELEGATE_EXECUTE_R1' | 'VONE_CLOUD_INFERENCE_R1', callerEstimate?: unknown): Promise<Response> {
-  const estimatedNeurons = estimateNeurons(prompt, maxTokens, callerEstimate), authority = await readAuthority(estimatedNeurons);
+  const estimatedNeurons = estimateNeurons(prompt, maxTokens, callerEstimate), authority = await readAuthority(env, estimatedNeurons);
   const holdProtocol = protocol === 'VONE_CLOUD_INFERENCE_R1' ? 'VONE_CLOUD_INFERENCE_R1' : 'VONE_DELEGATE_AUTHORITY_R2';
   if (!authority.cloud_verified_zero_cost || authority.reason !== 'VERIFIED_FREE_WITHIN_BUDGET') return holdResponse(authority, 503, holdProtocol);
   const reservation = reserveBudget(authority);
@@ -145,7 +153,7 @@ async function delegate(request: Request, env: Env): Promise<Response> {
   if (!prompt) return holdResponse(authorityResponse('PROMPT_INVALID', 0), 400);
   const maxTokens = maxTokensFrom(body), estimatedNeurons = estimateNeurons(prompt, maxTokens, body.estimated_neurons);
   if (mode === 'SMART' || mode === 'MAX') {
-    const authority = await readAuthority(estimatedNeurons);
+    const authority = await readAuthority(env, estimatedNeurons);
     if (!authority.cloud_verified_zero_cost) return holdResponse(authority);
     return holdResponse(authority.owned_fresh_heartbeat
       ? authorityResponse('OWNED_EXECUTOR_DELEGATION_UNAVAILABLE', estimatedNeurons, { ...authority, owned_fresh_heartbeat: true })
@@ -154,25 +162,25 @@ async function delegate(request: Request, env: Env): Promise<Response> {
   if (mode !== 'FAST' && mode !== 'AUTO') return holdResponse(authorityResponse('DELEGATE_MODE_INVALID', estimatedNeurons), 400);
   return executeFree(env, prompt, maxTokens, 'VONE_DELEGATE_EXECUTE_R1', body.estimated_neurons);
 }
-async function recoverySnapshot(): Promise<AuthorityResult> { return readAuthority(0); }
-async function recovery(): Promise<Response> {
-  const authority = await recoverySnapshot();
+async function recoverySnapshot(env: Env): Promise<AuthorityResult> { return readAuthority(env, 0); }
+async function recovery(env: Env): Promise<Response> {
+  const authority = await recoverySnapshot(env);
   return json({ ...authority, protocol: RECOVERY_PROTOCOL, authority, status: authority.reason === 'VERIFIED_FREE_WITHIN_BUDGET' ? 'READY' : 'HOLD' }, authority.reason === 'VERIFIED_FREE_WITHIN_BUDGET' ? 200 : 503);
 }
-async function publicStatus(): Promise<Response> {
-  const authority = await recoverySnapshot();
+async function publicStatus(env: Env): Promise<Response> {
+  const authority = await recoverySnapshot(env);
   return json({ ...authority, protocol: 'VONE_CLOUD_CONTROL_STATUS_R2', authority, architecture: 'CLOUDFLARE_DIRECT_CRITICAL_PATH_R2', appdeploy_required_for_fast: false, status: authority.reason === 'VERIFIED_FREE_WITHIN_BUDGET' ? 'FREE_AVAILABLE' : 'HOLD' });
 }
-async function logRecoverySnapshot(): Promise<void> {
-  const authority = await recoverySnapshot();
+async function logRecoverySnapshot(env: Env): Promise<void> {
+  const authority = await recoverySnapshot(env);
   console.log(JSON.stringify({ protocol: RECOVERY_PROTOCOL, authority_protocol: MASTER_PROTOCOL, source: authority.source, captured_at: new Date().toISOString(), cloud_verified_zero_cost: authority.cloud_verified_zero_cost, owned_fresh_heartbeat: authority.owned_fresh_heartbeat, paid_fallback: false, unknown_cost: 'HOLD', physical_output: 'LOCKED', appdeploy_required: false, remaining_neurons: authority.remaining_neurons, hard_cap_neurons: authority.hard_cap_neurons, protected_reserve_neurons: authority.protected_reserve_neurons, estimated_neurons: 0, reason: authority.reason }));
 }
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/health') return json({ service: 'V-ONE Cloud Inference R1', status: 'READY', auth: 'REQUIRED_FOR_INFERENCE', inference_policy: 'VERIFIED_FREE_ONLY', paid_blocked: 'INVIOLABLE', unknown_cost: 'HOLD', physical_output: 'LOCKED', model: MODEL });
-    if (request.method === 'GET' && url.pathname === '/status') return publicStatus();
-    if (request.method === 'GET' && url.pathname === '/recovery') { if (!controlAuthorized(request, env)) return json({ error: 'unauthorized' }, 401); return recovery(); }
+    if (request.method === 'GET' && url.pathname === '/status') return publicStatus(env);
+    if (request.method === 'GET' && url.pathname === '/recovery') { if (!controlAuthorized(request, env)) return json({ error: 'unauthorized' }, 401); return recovery(env); }
     if (request.method === 'POST' && (url.pathname === '/delegate' || url.pathname === '/infer')) {
       if (url.pathname === '/delegate') {
         if (!controlAuthorized(request, env)) return json({ error: 'unauthorized' }, 401);
@@ -187,5 +195,5 @@ export default {
     }
     return json({ error: 'not_found' }, 404);
   },
-  scheduled(_controller: unknown, _env: Env, context: { waitUntil(promise: Promise<unknown>): void }): void { context.waitUntil(logRecoverySnapshot()); },
+  scheduled(_controller: unknown, env: Env, context: { waitUntil(promise: Promise<unknown>): void }): void { context.waitUntil(logRecoverySnapshot(env)); },
 };

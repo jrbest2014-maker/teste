@@ -3,14 +3,18 @@ import worker from './vone_cloud_worker';
 
 const token = 'vone-cloud-test-token-that-is-long-enough';
 const smokeToken = 'vone-cloud-smoke-token-that-is-long-enough';
-const originalFetch = globalThis.fetch;
 const originalLog = console.log;
 let aiCalls = 0;
 let masterCalls = 0;
 let authorityMode: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN' | 'INSUFFICIENT' | 'STALE' = 'AVAILABLE';
 const logs: string[] = [];
 const responseBodies: string[] = [];
-type TestEnv = { AI: { run(model: string, input: unknown): Promise<unknown> }; VONE_INFERENCE_TOKEN?: string; VONE_SMOKE_TOKEN?: string };
+type TestEnv = {
+  AI: { run(model: string, input: unknown): Promise<unknown> };
+  VONE_MASTER?: { fetch(request: Request): Promise<Response> };
+  VONE_INFERENCE_TOKEN?: string;
+  VONE_SMOKE_TOKEN?: string;
+};
 
 function authorityPayload(): Record<string, unknown> {
   const result: Record<string, unknown> = {
@@ -39,13 +43,20 @@ async function smokeRequest(path: string, method: 'GET' | 'POST', body?: Record<
     method, headers: requestHeaders(authorization, smoke), ...(body ? { body: JSON.stringify(body) } : {}),
   }), environment);
 }
-const env: TestEnv = { AI: { async run() { aiCalls++; return { response: 'direct-cloud-result' }; } }, VONE_INFERENCE_TOKEN: token, VONE_SMOKE_TOKEN: smokeToken };
+const env: TestEnv = {
+  AI: { async run() { aiCalls++; return { response: 'direct-cloud-result' }; } },
+  VONE_MASTER: {
+    async fetch(request) {
+      masterCalls++;
+      assert.equal(request.url, 'https://vone-control-plane.vone-technology.workers.dev/api/status');
+      if (authorityMode === 'UNAVAILABLE') throw new Error('Master offline');
+      return new Response(JSON.stringify(authorityPayload()), { headers: { 'content-type': 'application/json' } });
+    },
+  },
+  VONE_INFERENCE_TOKEN: token,
+  VONE_SMOKE_TOKEN: smokeToken,
+};
 async function main(): Promise<void> {
-  globalThis.fetch = async () => {
-    masterCalls++;
-    if (authorityMode === 'UNAVAILABLE') throw new Error('Master offline');
-    return new Response(JSON.stringify(authorityPayload()), { headers: { 'content-type': 'application/json' } });
-  };
   console.log = (line?: unknown) => { logs.push(String(line)); };
   try {
     assert.equal((await callWorker(new Request('https://worker.test/health'), env)).status, 200);
@@ -72,6 +83,21 @@ async function main(): Promise<void> {
     assert.equal(fastResult.route, 'cloudflare-workers-ai'); assert.equal(fastResult.paid_fallback, false); assert.equal(fastResult.appdeploy_required, false);
     assert.equal(fastResult.cloud_verified_zero_cost, true); assert.equal(fastResult.source, 'VONE_MASTER_CLOUDFLARE');
     assert.equal((fastResult.authority as Record<string, unknown>).protocol, 'VONE_DELEGATE_AUTHORITY_R2');
+    const missingMasterEnv: TestEnv = { ...env, VONE_MASTER: undefined };
+    const missingBindingResponse = await callWorker(
+      new Request('https://worker.test/delegate', {
+        method: 'POST', headers: headers(), body: JSON.stringify({ mode: 'FAST', prompt: 'missing binding', max_tokens: 1 }),
+      }),
+      missingMasterEnv,
+    );
+    const missingBindingResult = await missingBindingResponse.json() as Record<string, unknown>;
+    assert.equal(missingBindingResponse.status, 503);
+    assert.equal(missingBindingResult.status, 'HOLD');
+    assert.equal(missingBindingResult.reason, 'MASTER_UNAVAILABLE');
+    assert.equal(missingBindingResult.paid_fallback, false);
+    assert.equal(missingBindingResult.unknown_cost, 'HOLD');
+    assert.equal(missingBindingResult.physical_output, 'LOCKED');
+    assert.equal(aiCalls, 2);
     authorityMode = 'UNAVAILABLE';
     const unavailable = await post('/delegate', { mode: 'AUTO', prompt: 'offline', max_tokens: 1 }), unavailableResult = await unavailable.json() as Record<string, unknown>;
     assert.equal(unavailableResult.status, 'HOLD'); assert.equal(unavailableResult.reason, 'MASTER_UNAVAILABLE'); assert.equal(unavailableResult.paid_fallback, false); assert.equal(aiCalls, 2);
@@ -113,6 +139,6 @@ async function main(): Promise<void> {
     const observed = `${responseBodies.join('\n')}\n${logs.join('\n')}`;
     assert.equal(observed.includes(token), false); assert.equal(observed.includes(smokeToken), false);
     console.log = originalLog; originalLog('vone_cloud_worker: all assertions passed');
-  } finally { globalThis.fetch = originalFetch; console.log = originalLog; }
+  } finally { console.log = originalLog; }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
