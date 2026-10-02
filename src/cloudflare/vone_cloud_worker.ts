@@ -3,7 +3,7 @@ interface MasterBinding { fetch(request: Request): Promise<Response>; }
 interface Env { AI: WorkersAI; VONE_MASTER?: MasterBinding; VONE_INFERENCE_TOKEN?: string; VONE_SMOKE_TOKEN?: string; }
 
 const MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct';
-const AUTHORITY_URL = 'https://vone-control-plane.vone-technology.workers.dev/api/status';
+const AUTHORITY_URL = 'https://vone-master.internal/api/status';
 const MAX_AUTHORITY_AGE_MS = 120_000;
 const MAX_OWNED_HEARTBEAT_AGE_MS = 120_000;
 const MASTER_PROTOCOL = 'VONE_DELEGATE_AUTHORITY_R2';
@@ -93,17 +93,17 @@ function reserveBudget(authority: AuthorityResult): AuthorityResult {
   locallyReservedNeurons += authority.estimated_neurons; return authority;
 }
 async function readAuthority(env: Env, estimatedNeurons: number): Promise<AuthorityResult> {
-  if (!env.VONE_MASTER) return authorityResponse('MASTER_UNAVAILABLE', estimatedNeurons);
+  if (!env.VONE_MASTER) return authorityResponse('MASTER_BINDING_MISSING', estimatedNeurons);
   let response: Response;
   try {
     const request = new Request(AUTHORITY_URL, {
-      method: 'GET', headers: { accept: 'application/json', 'cache-control': 'no-cache' },
-      redirect: 'error', signal: AbortSignal.timeout(5_000),
+      method: 'GET',
+      headers: { accept: 'application/json', 'cache-control': 'no-cache' },
     });
     response = await env.VONE_MASTER.fetch(request);
   }
-  catch { return authorityResponse('MASTER_UNAVAILABLE', estimatedNeurons); }
-  if (!response.ok) return authorityResponse('MASTER_UNAVAILABLE', estimatedNeurons);
+  catch { return authorityResponse('MASTER_BINDING_FETCH_FAILED', estimatedNeurons); }
+  if (!response.ok) return authorityResponse(`MASTER_HTTP_${response.status}`, estimatedNeurons);
   let master: MasterStatus | null;
   try { master = object(await response.json()) as MasterStatus | null; }
   catch { return authorityResponse('MASTER_RESPONSE_INVALID', estimatedNeurons); }

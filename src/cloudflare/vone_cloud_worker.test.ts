@@ -6,7 +6,7 @@ const smokeToken = 'vone-cloud-smoke-token-that-is-long-enough';
 const originalLog = console.log;
 let aiCalls = 0;
 let masterCalls = 0;
-let authorityMode: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN' | 'INSUFFICIENT' | 'STALE' = 'AVAILABLE';
+let authorityMode: 'AVAILABLE' | 'UNAVAILABLE' | 'HTTP_ERROR' | 'UNKNOWN' | 'INSUFFICIENT' | 'STALE' = 'AVAILABLE';
 const logs: string[] = [];
 const responseBodies: string[] = [];
 type TestEnv = {
@@ -48,8 +48,12 @@ const env: TestEnv = {
   VONE_MASTER: {
     async fetch(request) {
       masterCalls++;
-      assert.equal(request.url, 'https://vone-control-plane.vone-technology.workers.dev/api/status');
+      assert.equal(request.url, 'https://vone-master.internal/api/status');
+      assert.equal(request.method, 'GET');
+      assert.equal(request.headers.get('accept'), 'application/json');
+      assert.equal(request.headers.get('cache-control'), 'no-cache');
       if (authorityMode === 'UNAVAILABLE') throw new Error('Master offline');
+      if (authorityMode === 'HTTP_ERROR') return new Response(null, { status: 502 });
       return new Response(JSON.stringify(authorityPayload()), { headers: { 'content-type': 'application/json' } });
     },
   },
@@ -93,14 +97,22 @@ async function main(): Promise<void> {
     const missingBindingResult = await missingBindingResponse.json() as Record<string, unknown>;
     assert.equal(missingBindingResponse.status, 503);
     assert.equal(missingBindingResult.status, 'HOLD');
-    assert.equal(missingBindingResult.reason, 'MASTER_UNAVAILABLE');
+    assert.equal(missingBindingResult.reason, 'MASTER_BINDING_MISSING');
     assert.equal(missingBindingResult.paid_fallback, false);
     assert.equal(missingBindingResult.unknown_cost, 'HOLD');
     assert.equal(missingBindingResult.physical_output, 'LOCKED');
     assert.equal(aiCalls, 2);
+    authorityMode = 'HTTP_ERROR';
+    const httpError = await post('/delegate', { mode: 'FAST', prompt: 'Master HTTP error', max_tokens: 1 });
+    const httpErrorResult = await httpError.json() as Record<string, unknown>;
+    assert.equal(httpErrorResult.status, 'HOLD');
+    assert.equal(httpErrorResult.reason, 'MASTER_HTTP_502');
+    assert.equal(httpErrorResult.paid_fallback, false);
+    assert.equal(httpErrorResult.unknown_cost, 'HOLD');
+    assert.equal(httpErrorResult.physical_output, 'LOCKED');
     authorityMode = 'UNAVAILABLE';
     const unavailable = await post('/delegate', { mode: 'AUTO', prompt: 'offline', max_tokens: 1 }), unavailableResult = await unavailable.json() as Record<string, unknown>;
-    assert.equal(unavailableResult.status, 'HOLD'); assert.equal(unavailableResult.reason, 'MASTER_UNAVAILABLE'); assert.equal(unavailableResult.paid_fallback, false); assert.equal(aiCalls, 2);
+    assert.equal(unavailableResult.status, 'HOLD'); assert.equal(unavailableResult.reason, 'MASTER_BINDING_FETCH_FAILED'); assert.equal(unavailableResult.paid_fallback, false); assert.equal(unavailableResult.unknown_cost, 'HOLD'); assert.equal(unavailableResult.physical_output, 'LOCKED'); assert.equal(aiCalls, 2);
     authorityMode = 'UNKNOWN';
     const unknown = await post('/delegate', { mode: 'FAST', prompt: 'unknown', max_tokens: 1 }), unknownResult = await unknown.json() as Record<string, unknown>;
     assert.equal(unknownResult.status, 'HOLD'); assert.equal(unknownResult.cloud_verified_zero_cost, false); assert.equal(unknownResult.unknown_cost, 'HOLD'); assert.equal(unknownResult.paid_fallback, false); assert.equal(aiCalls, 2);
