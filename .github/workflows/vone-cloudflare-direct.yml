@@ -126,17 +126,22 @@ jobs:
           cleanup() {
             result=$?
             trap - EXIT
-            npx wrangler secret delete VONE_SMOKE_TOKEN --force || true
-            if ! secrets="$(npx wrangler secret list)"; then
-              echo "::error::Could not verify Worker secrets after smoke test"
-              result=1
-            elif ! printf '%s' "$secrets" | node --input-type=module -e '
-              let input = "";
-              for await (const chunk of process.stdin) input += chunk;
-              const secrets = JSON.parse(input);
-              const names = new Set(secrets.map(secret => secret.name));
-              if (names.has("VONE_SMOKE_TOKEN") || !names.has("VONE_INFERENCE_TOKEN")) process.exit(1);
-            '; then
+            printf 'y\n' | npx wrangler secret delete VONE_SMOKE_TOKEN || result=1
+            verified=0
+            for attempt in {1..10}; do
+              if secrets="$(npx wrangler secret list)" && printf '%s' "$secrets" | node --input-type=module -e '
+                let input = "";
+                for await (const chunk of process.stdin) input += chunk;
+                const secrets = JSON.parse(input);
+                const names = new Set(secrets.map(secret => secret.name));
+                if (names.has("VONE_SMOKE_TOKEN") || !names.has("VONE_INFERENCE_TOKEN")) process.exit(1);
+              '; then
+                verified=1
+                break
+              fi
+              if [ "$attempt" -lt 10 ]; then sleep 2; fi
+            done
+            if [ "$verified" -ne 1 ]; then
               echo "::error::Smoke secret cleanup or inference secret verification failed"
               result=1
             fi
@@ -163,7 +168,12 @@ jobs:
           const status = await statusResponse.json();
           if (status?.protocol !== "VONE_CLOUD_CONTROL_STATUS_R2") throw new Error("status_contract_invalid");
 
-          const recoveryResponse = await fetch(`${base}/recovery`, { headers: smokeHeaders });
+          let recoveryResponse;
+          for (let attempt = 1; attempt <= 10; attempt++) {
+            recoveryResponse = await fetch(`${base}/recovery`, { headers: smokeHeaders });
+            if (recoveryResponse.status !== 401 && recoveryResponse.status !== 403) break;
+            if (attempt < 10) await new Promise(resolve => setTimeout(resolve, 2000));
+          }
           if (!recoveryResponse.ok) throw new Error("recovery_http_" + recoveryResponse.status);
           const recovery = await recoveryResponse.json();
           if (recovery?.protocol !== "VONE_CLOUD_RECOVERY_SNAPSHOT_R2") throw new Error("recovery_contract_invalid");
@@ -178,6 +188,7 @@ jobs:
           if (delegate?.status !== "DONE" ||
               delegate?.target !== "CLOUD_FREE" ||
               delegate?.route !== "cloudflare-workers-ai" ||
+              delegate?.cloud_verified_zero_cost !== true ||
               delegate?.paid_fallback !== false ||
               delegate?.appdeploy_required !== false) {
             throw new Error("delegate_contract_invalid");
