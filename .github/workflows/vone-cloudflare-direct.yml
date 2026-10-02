@@ -1,0 +1,196 @@
+name: V-ONE Cloudflare Direct
+
+on:
+  push:
+    branches:
+      - chatgpt/cloudflare-direct-r1
+    paths:
+      - ".github/workflows/vone-cloudflare-direct.yml"
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Validate or deploy"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - deploy
+      source_ref:
+        description: "Canonical V-ONE source"
+        required: true
+        default: chatgpt/worker-identity-r1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vone-cloudflare-direct
+  cancel-in-progress: false
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout canonical V-ONE source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || 'chatgpt/worker-identity-r1' }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify Cloudflare credentials exist
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo "::error::CLOUDFLARE_API_TOKEN missing"
+            exit 78
+          }
+
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || {
+            echo "::error::CLOUDFLARE_ACCOUNT_ID missing"
+            exit 78
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test V-ONE safety gates
+        run: npm test
+
+      - name: Wrangler dry-run
+        run: npm run cf:dry-run
+
+      - name: Deploy Cloudflare Worker
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' }}
+        run: npm run cf:deploy
+
+      - name: Verify Worker health
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const url =
+            "https://v-one-cloud-inference-r1.vone-technology.workers.dev/health";
+
+          const response = await fetch(url);
+
+          if (!response.ok) {
+            throw new Error("health_http_" + response.status);
+          }
+
+          const body = await response.json();
+
+          console.log(JSON.stringify({
+            service: body?.service,
+            status: body?.status,
+            inference_policy: body?.inference_policy,
+            paid_blocked: body?.paid_blocked,
+            physical_output: body?.physical_output,
+            model: body?.model
+          }));
+
+          const valid =
+            body?.service === "V-ONE Cloud Inference R1" &&
+            body?.status === "READY" &&
+            body?.inference_policy === "VERIFIED_FREE_ONLY" &&
+            body?.paid_blocked === "INVIOLABLE" &&
+            body?.physical_output === "LOCKED";
+
+          if (!valid) {
+            throw new Error("health_contract_invalid");
+          }
+          NODE
+
+      - name: Smoke test deployed Worker
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            result=$?
+            trap - EXIT
+            printf 'y\n' | npx wrangler secret delete VONE_SMOKE_TOKEN || result=1
+            verified=0
+            for attempt in {1..10}; do
+              if secrets="$(npx wrangler secret list)" && printf '%s' "$secrets" | node --input-type=module -e '
+                let input = "";
+                for await (const chunk of process.stdin) input += chunk;
+                const secrets = JSON.parse(input);
+                const names = new Set(secrets.map(secret => secret.name));
+                if (names.has("VONE_SMOKE_TOKEN") || !names.has("VONE_INFERENCE_TOKEN")) process.exit(1);
+              '; then
+                verified=1
+                break
+              fi
+              if [ "$attempt" -lt 10 ]; then sleep 2; fi
+            done
+            if [ "$verified" -ne 1 ]; then
+              echo "::error::Smoke secret cleanup or inference secret verification failed"
+              result=1
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+
+          smoke_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$smoke_token"
+          printf '%s' "$smoke_token" | npx wrangler secret put VONE_SMOKE_TOKEN
+
+          SMOKE_TOKEN="$smoke_token" node --input-type=module <<'NODE'
+          const base = "https://v-one-cloud-inference-r1.vone-technology.workers.dev";
+          const smokeToken = process.env.SMOKE_TOKEN;
+          if (!smokeToken) throw new Error("smoke_token_missing");
+          const smokeHeaders = {
+            authorization: ["Bearer", smokeToken].join(" "),
+            "x-vone-ci-smoke": "1",
+            "content-type": "application/json"
+          };
+
+          const statusResponse = await fetch(`${base}/status`);
+          if (!statusResponse.ok) throw new Error("status_http_" + statusResponse.status);
+          const status = await statusResponse.json();
+          if (status?.protocol !== "VONE_CLOUD_CONTROL_STATUS_R2") throw new Error("status_contract_invalid");
+
+          let recoveryResponse;
+          for (let attempt = 1; attempt <= 10; attempt++) {
+            recoveryResponse = await fetch(`${base}/recovery`, { headers: smokeHeaders });
+            if (recoveryResponse.status !== 401 && recoveryResponse.status !== 403) break;
+            if (attempt < 10) await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+          if (!recoveryResponse.ok) throw new Error("recovery_http_" + recoveryResponse.status);
+          const recovery = await recoveryResponse.json();
+          if (recovery?.protocol !== "VONE_CLOUD_RECOVERY_SNAPSHOT_R2") throw new Error("recovery_contract_invalid");
+
+          const delegateResponse = await fetch(`${base}/delegate`, {
+            method: "POST",
+            headers: smokeHeaders,
+            body: JSON.stringify({ profile: "FAST", prompt: "smoke", max_tokens: 1 })
+          });
+          if (!delegateResponse.ok) throw new Error("delegate_http_" + delegateResponse.status);
+          const delegate = await delegateResponse.json();
+          if (delegate?.status !== "DONE" ||
+              delegate?.target !== "CLOUD_FREE" ||
+              delegate?.route !== "cloudflare-workers-ai" ||
+              delegate?.cloud_verified_zero_cost !== true ||
+              delegate?.paid_fallback !== false ||
+              delegate?.appdeploy_required !== false) {
+            throw new Error("delegate_contract_invalid");
+          }
+          NODE

@@ -3,10 +3,8 @@
   "name": "v-one-cloud-inference-r1",
   "main": "src/cloudflare/vone_cloud_worker.ts",
   "compatibility_date": "2026-09-26",
-  "ai": {
-    "binding": "AI"
-  },
-  "observability": {
-    "enabled": true
-  }
+  "ai": { "binding": "AI" },
+  "services": [{ "binding": "VONE_MASTER", "service": "vone-control-plane" }],
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "observability": { "enabled": true }
 }
