@@ -1,0 +1,54 @@
+﻿diff --git "a/C:\\Users\\User\\V-ONE-CLOUDFLARE-CONTROL\\src\\index.js.bak-capability-dispatch-r1" "b/C:\\Users\\User\\V-ONE-CLOUDFLARE-CONTROL\\src\\index.js"
+index fd06ec9..29a87ce 100644
+--- "a/C:\\Users\\User\\V-ONE-CLOUDFLARE-CONTROL\\src\\index.js.bak-capability-dispatch-r1"
++++ "b/C:\\Users\\User\\V-ONE-CLOUDFLARE-CONTROL\\src\\index.js"
+@@ -1785,11 +1785,45 @@ async function handleClaim(request, env) {
+   const workerId = String(body.workerId || 'LIGHTNING_T4_01').slice(0, 120);
+   await resetStaleClaims(env);
+ 
+-  const pending = await env.DB.prepare(
+-    "SELECT id,tool_name,args FROM jobs WHERE status='pending' ORDER BY created_at ASC LIMIT 1"
+-  ).first();
++  const workerRow = await env.DB.prepare(
++    "SELECT status_json FROM worker_status WHERE worker_id=? LIMIT 1"
++  ).bind(workerId).first();
++
++  let capabilities = [];
++  try {
++    const status = JSON.parse(workerRow?.status_json || '{}');
++    if (Array.isArray(status?.capabilities)) {
++      capabilities = [...new Set(
++        status.capabilities
++          .map((value) => String(value || '').trim())
++          .filter(Boolean)
++          .slice(0, 64)
++      )];
++    }
++  } catch {}
++
++  let pending = null;
++  if (capabilities.length > 0) {
++    const placeholders = capabilities.map(() => '?').join(',');
++    pending = await env.DB.prepare(
++      `SELECT id,tool_name,args FROM jobs
++       WHERE status='pending' AND tool_name IN (${placeholders})
++       ORDER BY created_at ASC LIMIT 1`
++    ).bind(...capabilities).first();
++  } else {
++    // Backward-compatible fallback for legacy workers that do not advertise
++    // capabilities yet. Capability-aware workers are strictly filtered.
++    pending = await env.DB.prepare(
++      "SELECT id,tool_name,args FROM jobs WHERE status='pending' ORDER BY created_at ASC LIMIT 1"
++    ).first();
++  }
+ 
+-  if (!pending) return reply({ ok: true, job: null });
++  if (!pending) return reply({
++    ok: true,
++    job: null,
++    dispatcher: capabilities.length > 0 ? 'CAPABILITY_AWARE_R1' : 'LEGACY_FALLBACK',
++    capabilities
++  });
+ 
+   const claimedAt = Date.now();
+   const update = await env.DB.prepare(
