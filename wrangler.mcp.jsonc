@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mcp",
+  "main": "src/cloudflare/vone_mcp_edge.ts",
+  "compatibility_date": "2026-09-29",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "services": [
+    {
+      "binding": "VONE_MASTER",
+      "service": "vone-control-plane"
+    }
+  ]
+}
