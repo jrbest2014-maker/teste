@@ -1,0 +1,15 @@
+{
+  "protocol": "VONE_ECOSYSTEM_RADAR_R1",
+  "sources": [
+    {"id":"openai-api-changelog","vendor":"openai","kind":"changelog","url":"https://developers.openai.com/api/docs/changelog"},
+    {"id":"openai-node-release","vendor":"openai","kind":"github-release","url":"https://api.github.com/repos/openai/openai-node/releases/latest"},
+    {"id":"anthropic-platform-release-notes","vendor":"anthropic","kind":"changelog","url":"https://platform.claude.com/docs/en/release-notes/overview"},
+    {"id":"anthropic-sdk-release","vendor":"anthropic","kind":"github-release","url":"https://api.github.com/repos/anthropics/anthropic-sdk-typescript/releases/latest"},
+    {"id":"ollama-blog","vendor":"ollama","kind":"changelog","url":"https://ollama.com/blog"},
+    {"id":"ollama-release","vendor":"ollama","kind":"github-release","url":"https://api.github.com/repos/ollama/ollama/releases/latest"},
+    {"id":"github-copilot-changelog","vendor":"github-copilot","kind":"changelog","url":"https://github.blog/changelog/label/copilot/"},
+    {"id":"mcp-spec-changelog","vendor":"mcp","kind":"protocol","url":"https://modelcontextprotocol.io/specification/draft/changelog"},
+    {"id":"mcp-typescript-sdk-release","vendor":"mcp","kind":"github-release","url":"https://api.github.com/repos/modelcontextprotocol/typescript-sdk/releases/latest"},
+    {"id":"meta-ai-blog","vendor":"meta-llama","kind":"changelog","url":"https://ai.meta.com/blog/"}
+  ]
+}
