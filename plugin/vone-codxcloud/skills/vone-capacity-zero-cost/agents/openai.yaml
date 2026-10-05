@@ -1,0 +1,6 @@
+interface:
+  display_name: "V-ONE Zero-Cost Capacity"
+  short_description: "Route work through verified zero-cost capacity"
+  default_prompt: "Use $vone-capacity-zero-cost to choose a verified route without allowing paid fallback."
+policy:
+  allow_implicit_invocation: true

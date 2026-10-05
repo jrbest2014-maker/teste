@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "vone-codxcloud",
+  "version": "1.0.0",
+  "description": "V-ONE company engineering operator backed by the canonical V-ONE Master for execution, continuity, zero-cost routing, release validation and audited learning.",
+  "author": {
+    "name": "MEGA CORP FY"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "V-ONE CODXCLOUD",
+        "shortDescription": "V-ONE company operator",
+        "longDescription": "Engineering, execution, continuity, zero-cost routing and release workflows backed by the canonical V-ONE Master Cloudflare MCP.",
+        "developerName": "MEGA CORP FY",
+        "category": "Productivity",
+        "capabilities": [
+          "Interactive"
+        ],
+        "defaultPrompt": [
+          "Inspect the current V-ONE state and continue the mission from the canonical checkpoint.",
+          "Use V-ONE to execute this engineering task through a verified zero-cost route and return evidence.",
+          "Validate the current V-ONE release gate and report PASS, FAIL or HOLD with evidence."
+        ]
+      }
+    }
+  }
+}

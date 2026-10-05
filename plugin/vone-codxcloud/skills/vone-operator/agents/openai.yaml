@@ -1,0 +1,6 @@
+interface:
+  display_name: "V-ONE Operator"
+  short_description: "Orchestrate V-ONE safely across runtimes"
+  default_prompt: "Use $vone-operator to inspect V-ONE state and continue the mission through the safest validated route."
+policy:
+  allow_implicit_invocation: true
