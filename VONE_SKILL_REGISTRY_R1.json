@@ -1,0 +1,84 @@
+{
+  "version": "VONE_SKILL_REGISTRY_R1",
+  "authority": "V-ONE Master",
+  "canonical_mcp": "https://vone-control-plane.vone-technology.workers.dev/mcp",
+  "public_bootstrap_mcp": "https://vone-control-plane.vone-technology.workers.dev/mcp-public",
+  "local_credential_bridge": "C:\\Users\\User\\NEXUS-WORK-NODE\\vone-master-credential-bridge.mjs",
+  "policy": {
+    "paid_blocked": "INVIOLABLE",
+    "unknown_cost": "HOLD",
+    "no_evidence_no_pass": true
+  },
+  "runtimes": {
+    "claude": {
+      "skills_dir": "%USERPROFILE%\\.claude\\skills",
+      "agent": "%USERPROFILE%\\.claude\\agents\\v-one.md"
+    },
+    "codex": {
+      "skills_dir": "%USERPROFILE%\\.codex\\skills",
+      "mcp_name": "v-one-master-local"
+    },
+    "openai": {
+      "delivery": "plugin/MCP/web/PWA; secrets remain outside skill files"
+    }
+  },
+  "skills": [
+    {
+      "name": "vone-operator",
+      "tools": [
+        "vone_status",
+        "vone_capacity_plan",
+        "vone_delegate_execute",
+        "vone_job_status",
+        "yellow_status",
+        "yellow_route_preview",
+        "ask_yellow"
+      ]
+    },
+    {
+      "name": "vone-engineering",
+      "tools": [
+        "vone_delegate_execute",
+        "vone_job_status",
+        "vone_capacity_plan"
+      ]
+    },
+    {
+      "name": "vone-continuity",
+      "tools": [
+        "vone_resume_mission",
+        "vone_list_missions",
+        "vone_list_artifacts",
+        "vone_checkpoint",
+        "vone_register_artifact"
+      ]
+    },
+    {
+      "name": "vone-capacity-zero-cost",
+      "tools": [
+        "vone_status",
+        "vone_capacity_plan",
+        "vone_dispatch_worker",
+        "vone_release_worker"
+      ]
+    },
+    {
+      "name": "vone-release-gate",
+      "tools": [
+        "vone_status",
+        "vone_capacity_plan",
+        "vone_checkpoint",
+        "vone_register_artifact",
+        "vone_delegate_execute",
+        "vone_job_status"
+      ]
+    },
+    {
+      "name": "vone-learning",
+      "tools": [
+        "vone_learning_summary",
+        "vone_learning_record"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "V-ONE Engineering"
+  short_description: "Inspect, patch, test and verify V-ONE code"
+  default_prompt: "Use $vone-engineering to implement this change with rollback, tests and evidence."
+policy:
+  allow_implicit_invocation: true

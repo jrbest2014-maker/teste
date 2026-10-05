@@ -1,0 +1,6 @@
+interface:
+  display_name: "V-ONE Continuity"
+  short_description: "Resume missions and preserve checkpoints"
+  default_prompt: "Use $vone-continuity to recover the latest canonical checkpoint and continue without restarting completed work."
+policy:
+  allow_implicit_invocation: true

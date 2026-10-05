@@ -1,0 +1,6 @@
+interface:
+  display_name: "V-ONE Learning"
+  short_description: "Preserve operational decisions and corrections"
+  default_prompt: "Use $vone-learning to record or retrieve the operational learning relevant to this mission."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "V-ONE Release Gate"
+  short_description: "Close releases with tests, smoke and evidence"
+  default_prompt: "Use $vone-release-gate to validate this release and return PASS, FAIL or HOLD with evidence."
+policy:
+  allow_implicit_invocation: true
