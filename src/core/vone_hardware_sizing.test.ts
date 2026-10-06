@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
     INSTALLED_OLLAMA_MODELS,
+    MEASURED_BENCHMARKS,
     describeOwnedDesktop,
     estimateVram,
     fitsInVram,
@@ -62,11 +63,15 @@ function main(): void {
     // The installed-model inventory must be non-empty and recommend the
     // smallest one for CPU-only hardware - which must be v-one-coder:fast
     // (tied in size with qwen2.5-coder:1.5b), the model already wired as
-    // the worker's default.
+    // the worker's default. A measured benchmark exists for it, so the
+    // reason must cite the real tok/s rather than ask for one.
     assert.ok(INSTALLED_OLLAMA_MODELS.length > 0);
+    assert.ok(MEASURED_BENCHMARKS.some((b) => b.tag === 'v-one-coder:fast'));
     const recommendation = recommendDefaultModel(desktop, INSTALLED_OLLAMA_MODELS);
     assert.equal(recommendation.tag, 'v-one-coder:fast');
     assert.ok(/4C\/8T/.test(recommendation.reason));
+    assert.ok(/15\.88 tok\/s/.test(recommendation.reason));
+    assert.ok(!/Benchmark with/.test(recommendation.reason)); // a measured model shouldn't ask to be benchmarked
 
     // A larger model in the list must not win the "smallest" pick.
     const biasedTowardsLarge = recommendDefaultModel(desktop, [
@@ -74,6 +79,9 @@ function main(): void {
         { tag: 'small', sizeGb: 0.9 },
     ]);
     assert.equal(biasedTowardsLarge.tag, 'small');
+    // No benchmark exists for "small" -> the reason must ask for one, not invent a number.
+    assert.ok(/Benchmark with/.test(biasedTowardsLarge.reason));
+    assert.ok(!/tok\/s/.test(biasedTowardsLarge.reason));
 
     assert.throws(() => recommendDefaultModel(desktop, []), /no installed models/);
 

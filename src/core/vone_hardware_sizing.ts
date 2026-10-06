@@ -146,6 +146,29 @@ export const INSTALLED_OLLAMA_MODELS: readonly InstalledOllamaModel[] = [
     { tag: 'qwen3-coder:latest', sizeGb: 18 },
 ];
 
+export interface ModelBenchmark {
+    readonly tag: string;
+    readonly promptEvalTokensPerSec: number;
+    readonly evalTokensPerSec: number;
+    /** Free-text provenance: how/when this number was measured. */
+    readonly measuredAt: string;
+}
+
+/**
+ * Real `ollama run <tag> --verbose` measurements on the owned desktop.
+ * Unlike INSTALLED_OLLAMA_MODELS (inventory) these are measured facts, not
+ * assumptions - add an entry here only after actually running the command
+ * and reading its eval rate / prompt eval rate lines.
+ */
+export const MEASURED_BENCHMARKS: readonly ModelBenchmark[] = [
+    {
+        tag: 'v-one-coder:fast',
+        promptEvalTokensPerSec: 59.3,
+        evalTokensPerSec: 15.88,
+        measuredAt: '2026-10-06, `ollama run v-one-coder:fast --verbose` on the owned desktop (431 tokens generated)',
+    },
+];
+
 export interface ModelRecommendation {
     readonly tag: string;
     readonly reason: string;
@@ -154,23 +177,29 @@ export interface ModelRecommendation {
 /**
  * On CPU-only hardware the smallest installed model minimizes latency per
  * token, which is why it's the default recommendation - not because larger
- * models don't fit (several do, comfortably, in ~32GB RAM). This never
- * claims a tokens/sec number: that must come from `ollama run <tag>
- * --verbose` on the real machine.
+ * models don't fit (several do, comfortably, in ~32GB RAM). When a measured
+ * benchmark exists for the picked model (MEASURED_BENCHMARKS), the reason
+ * cites the real tokens/sec instead of asking for one - never claim a
+ * number that wasn't actually measured.
  */
 export function recommendDefaultModel(
     profile: OwnedDesktopProfile,
     installed: readonly InstalledOllamaModel[],
+    benchmarks: readonly ModelBenchmark[] = MEASURED_BENCHMARKS,
 ): ModelRecommendation {
     if (installed.length === 0) {
         throw new Error('no installed models to recommend from - run `ollama list` and populate it');
     }
     const smallest = installed.reduce((a, b) => (b.sizeGb < a.sizeGb ? b : a));
-    return {
-        tag: smallest.tag,
-        reason:
-            `CPU-only hardware (${profile.cpuLabel}, ${profile.physicalCores}C/${profile.logicalProcessors}T): ` +
-            `the smallest installed model (${smallest.sizeGb}GB) minimizes latency per token. Benchmark with ` +
-            `\`ollama run ${smallest.tag} --verbose\` to confirm real tokens/sec before relying on it for the FAST route.`,
-    };
+    const measured = benchmarks.find((b) => b.tag === smallest.tag);
+
+    const reason = measured
+        ? `CPU-only hardware (${profile.cpuLabel}, ${profile.physicalCores}C/${profile.logicalProcessors}T): ` +
+          `the smallest installed model (${smallest.sizeGb}GB), measured at ${measured.evalTokensPerSec} tok/s ` +
+          `generation / ${measured.promptEvalTokensPerSec} tok/s prompt eval (${measured.measuredAt}).`
+        : `CPU-only hardware (${profile.cpuLabel}, ${profile.physicalCores}C/${profile.logicalProcessors}T): ` +
+          `the smallest installed model (${smallest.sizeGb}GB) minimizes latency per token. Benchmark with ` +
+          `\`ollama run ${smallest.tag} --verbose\` to confirm real tokens/sec before relying on it for the FAST route.`;
+
+    return { tag: smallest.tag, reason };
 }
