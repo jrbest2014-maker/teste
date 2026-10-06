@@ -5,8 +5,8 @@
  * fragmentation and CUDA context overhead. Use it to decide "does this
  * model plausibly fit before downloading tens of gigabytes", not as a
  * guarantee down to the megabyte. All inputs come from the owner's own
- * hardware (see describeAssumedGpu below for the explicit placeholder used
- * until real `nvidia-smi` / `ollama list` output is provided).
+ * hardware (see describeOwnedDesktop below for the measured profile of
+ * their actual desktop).
  *
  * Formula:
  *   weights  = paramsBillion * 1e9 * (bitsPerWeight / 8)                  bytes
@@ -77,27 +77,41 @@ export function fitsInVram(estimate: VramEstimate, availableVramGb: number, head
     return estimate.totalGb + headroomGb <= availableVramGb;
 }
 
-export interface AssumedGpu {
-    readonly label: string;
-    readonly vramGb: number;
+export interface OwnedDesktopProfile {
+    readonly gpuLabel: string;
+    readonly hasDedicatedGpu: boolean;
+    /** GB of dedicated VRAM, or null when there is none (integrated/shared graphics). */
+    readonly dedicatedVramGb: number | null;
     readonly systemRamGb: number;
-    readonly note: string;
+    readonly inferenceMode: 'cpu' | 'gpu';
+    readonly caveats: readonly string[];
 }
 
 /**
- * Placeholder hardware used ONLY until the owner's desktop reports its real
- * `nvidia-smi` / `ollama list` output. Every caller that uses this MUST
- * surface `note` to the user - estimates against it are hypotheticals, not
- * measurements of real hardware.
+ * The owner's actual desktop, as measured from `Get-CimInstance
+ * Win32_VideoController` / `Win32_ComputerSystem` output (2026-10-06):
+ * Intel UHD Graphics 620 (integrated - no CUDA/ROCm) and ~31.8GB RAM.
+ * Ollama therefore runs CPU-only here, backed by system RAM, not VRAM -
+ * fitsInVram() can still be used against `systemRamGb` for a memory-FIT
+ * check (the weights+overhead math is the same), but a RAM fit says
+ * nothing about tokens/sec: CPU inference is typically far slower than a
+ * mid-range discrete GPU for the same model. Update this when the owner's
+ * hardware changes or a second machine joins.
  */
-export function describeAssumedGpu(): AssumedGpu {
+export function describeOwnedDesktop(): OwnedDesktopProfile {
     return Object.freeze({
-        label: 'RTX 3090 (assumed placeholder)',
-        vramGb: 24,
-        systemRamGb: 64,
-        note:
-            'PLACEHOLDER supplied by the user as a stand-in, not a measurement of real hardware. ' +
-            'Replace with real `nvidia-smi --query-gpu=name,memory.total --format=csv` / `free -h` ' +
-            'output before trusting any fit/no-fit conclusion.',
+        gpuLabel: 'Intel(R) UHD Graphics 620 (integrated)',
+        hasDedicatedGpu: false,
+        dedicatedVramGb: null,
+        systemRamGb: 31.84, // 34185502720 bytes / 1024^3, from Win32_ComputerSystem
+        inferenceMode: 'cpu',
+        caveats: [
+            'Windows reported AdapterRAM=1GiB for this integrated GPU - a well-known-unreliable ' +
+                'WMI value for iGPUs (the field is a 32-bit DWORD that misreports for large shared-memory ' +
+                'adapters). Not treated as real dedicated VRAM; dedicatedVramGb is null, not 1.',
+            'No NVIDIA/AMD discrete GPU detected: Ollama runs CPU-only here. Fitting in RAM means the ' +
+                'model will load and run, not that it will run fast - prefer small, aggressively ' +
+                'quantized models (<=7-8B, Q4) for usable latency on CPU.',
+        ],
     });
 }

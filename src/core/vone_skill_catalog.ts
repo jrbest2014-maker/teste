@@ -59,18 +59,21 @@ token belongs in Git, logs, or test fixtures, redacted or not.`,
         title: 'V-ONE Hardware Sizing',
         version: '1.0.0',
         description:
-            'Estimates whether a local LLM (by parameter count and quantization) fits in a given amount of ' +
-            'VRAM, with an explicit, labeled placeholder GPU for use before real hardware specs are known. ' +
-            'Use before recommending or downloading a larger local model for the owned worker.',
+            'Estimates whether a local LLM (by parameter count and quantization) fits in available VRAM or ' +
+            'RAM, against the owned desktop\'s measured profile (CPU-only, Intel UHD 620, ~32GB RAM, no ' +
+            'dedicated GPU). Use before recommending or downloading a larger local model for the owned worker.',
         triggers: ['vram', 'gpu sizing', 'does it fit', 'hardware sizing', 'quantization size'],
         implementedBy: ['src/core/vone_hardware_sizing.ts'],
         body: `Call estimateVram({ paramsBillion, bitsPerWeight, ...optional KV-cache
 fields }) to get a weights/kvCache/overhead/total breakdown in GB, then
-fitsInVram(estimate, availableVramGb) to check it against the real GPU.
+fitsInVram(estimate, availableGb, headroomGb) to check it against real
+capacity - describeOwnedDesktop() reports the owner's measured hardware
+(no dedicated GPU, CPU-only inference, ~32GB system RAM) and its caveats,
+including why the GPU's reported 1GiB "VRAM" is not trusted as real.
 
-Never treat describeAssumedGpu()'s placeholder values as a measurement -
-its \`note\` field exists specifically to be surfaced to the user, and any
-conclusion drawn from it must be labeled as hypothetical until the owner
-provides real \`nvidia-smi\` / \`ollama list\` output from their own machine.`,
+A RAM/VRAM fit only means the model loads - it says nothing about
+tokens/sec. On CPU-only hardware, prefer small, aggressively quantized
+models (<=7-8B, Q4) for usable latency, and re-run describeOwnedDesktop()'s
+source if the owner's hardware changes.`,
     },
 ];

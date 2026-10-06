@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describeAssumedGpu, estimateVram, fitsInVram } from './vone_hardware_sizing';
+import { describeOwnedDesktop, estimateVram, fitsInVram } from './vone_hardware_sizing';
 
 function main(): void {
     // Reference point: a 7B model at 4 bits/weight should land close to the
@@ -35,12 +35,20 @@ function main(): void {
     assert.throws(() => estimateVram({ paramsBillion: 7, bitsPerWeight: 0 }), /bitsPerWeight/);
     assert.throws(() => estimateVram({ paramsBillion: 7, bitsPerWeight: 4, overheadFraction: -0.1 }), /overheadFraction/);
 
-    // The placeholder GPU must self-identify as a placeholder, not real data.
-    const assumed = describeAssumedGpu();
-    assert.equal(assumed.vramGb, 24);
-    assert.equal(assumed.systemRamGb, 64);
-    assert.ok(/placeholder/i.test(assumed.note));
-    assert.ok(/not a measurement/i.test(assumed.note));
+    // The owned-desktop profile reflects measured reality: no dedicated GPU,
+    // the unreliable 1GiB WMI reading not trusted as real VRAM, and the
+    // caveats explaining both must be present.
+    const desktop = describeOwnedDesktop();
+    assert.equal(desktop.hasDedicatedGpu, false);
+    assert.equal(desktop.dedicatedVramGb, null);
+    assert.equal(desktop.inferenceMode, 'cpu');
+    assert.ok(desktop.systemRamGb > 30 && desktop.systemRamGb < 33);
+    assert.ok(desktop.caveats.some((c) => /unreliable/i.test(c)));
+    assert.ok(desktop.caveats.some((c) => /CPU-only/i.test(c)));
+
+    // CPU-only reality: a 7B Q4 model's footprint must comfortably fit the
+    // real RAM with headroom - this is the actual sizing question now.
+    assert.equal(fitsInVram(sevenB, desktop.systemRamGb, 4), true);
 
     console.log('vone_hardware_sizing: all assertions passed');
 }
