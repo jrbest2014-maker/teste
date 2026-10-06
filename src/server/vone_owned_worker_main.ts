@@ -1,7 +1,8 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { VOneVFSSandbox } from '../core/vone_vfs_sandbox';
-import { VOneHydrationEngine } from '../core/vone_hydration_engine';
+import { VOneSessionHydrationEngine, resolveExecutorStateRoot } from '../core/vone_session_hydration_engine';
 import { VOneUnifiedHubAgent } from '../core/vone_unified_hub_agent';
 import { VOneExecutor } from './vone_executor';
 import { ModelRouter, createDefaultGates } from './vone_model_router';
@@ -35,7 +36,11 @@ async function main(): Promise<void> {
     if (!fs.existsSync(projectRoot)) throw new Error('VONE_PROJECT_ROOT_not_found');
 
     const sandbox = new VOneVFSSandbox(projectRoot);
-    const hydration = new VOneHydrationEngine(sandbox);
+    // One checkpoint per session, outside the project root the agent writes in: a re-delivered
+    // job finds its own DONE checkpoint and replays instead of re-executing.
+    const stateRoot = resolveExecutorStateRoot(projectRoot, workerId, process.env.VONE_STATE_ROOT, os.homedir());
+    fs.mkdirSync(stateRoot, { recursive: true });
+    const hydration = new VOneSessionHydrationEngine(new VOneVFSSandbox(stateRoot), 'sessions');
     const gates = createDefaultGates();
     const ollamaCaller = new OllamaModelCaller();
     const master = new VOneMasterWorkerHttpClient({ baseUrl: masterUrl, workerId, workerToken });
@@ -91,6 +96,7 @@ async function main(): Promise<void> {
         provider: 'ollama',
         model,
         projectRoot,
+        stateRoot,
         gates,
     }));
 
