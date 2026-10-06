@@ -1,0 +1,36 @@
+{
+  "plugin_preservation_checks": 57,
+  "protected_continuity_available": false,
+  "review": "Public read-only recovery reference restored; no other actionable findings",
+  "live_source_unchanged": true,
+  "candidate_control_broker_sha256": "469dcbd7c06e82b45db79af6aedf1df55829f1c8de90325df4601e85bcc6f8ab",
+  "branch": "codex/vone-continuity-improvements-r2",
+  "plugin_version": "1.0.1",
+  "date": "2026-10-06",
+  "baseline": "e3ddb23bc6503e6582f6c7abab9e08b94d471fe4",
+  "timezone": "America/Sao_Paulo",
+  "test_scripts": [
+    "ops/control-plane/test-heartbeat-contract.mjs",
+    "ops/control-plane/test-capacity-broker.mjs",
+    "ops/control-plane/test-capacity-p2.mjs",
+    "ops/control-plane/test-capacity-p3.mjs",
+    "ops/control-plane/test-capacity-p4.mjs",
+    "ops/control-plane/test-capacity-p5.mjs",
+    "src/server/vone_capacity_snapshot.test.ts",
+    "src/server/vone_executor.test.ts",
+    "src/server/vone_owned_executor_worker.test.ts"
+  ],
+  "rollback": "Isolated candidate; live source and installed runtime preserved",
+  "strict_targeted_typecheck": "PASS",
+  "test_result": "ALL_PASSED",
+  "protected_mcp_tools_observed": [
+    "vone_status",
+    "vone_capacity_plan"
+  ],
+  "result": "PASS_LOCAL_VALIDATION",
+  "original_control_broker_sha256": "1ad83eda7bcd2b67f1e9dd6355a14754a8ba7d8c6edee05a03f38175492c31d7",
+  "release_gate": "HOLD_PRODUCTION_RELEASE",
+  "plugin_zip_sha256": "2e06c7e7a91aebde9cbf2bdc9b396e3b0413fba0968c1d99663112f031dd9121",
+  "local_inference_performed": false,
+  "deployment_performed": false
+}

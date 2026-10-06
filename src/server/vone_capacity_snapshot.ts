@@ -152,8 +152,8 @@ export function assertVerifiedCapacitySnapshot(
     const health = route.health && typeof route.health === 'object' ? route.health as Record<string, unknown> : {};
     const observedMs = Date.parse(String(health.observed_at ?? ''));
     const ttlSeconds = Number(health.ttl_seconds ?? 0);
-    if (!Number.isFinite(observedMs) || !Number.isFinite(ttlSeconds) || ttlSeconds <= 0 || nowMs - observedMs > ttlSeconds * 1000) {
-        throw new CapacitySnapshotBlockedError('capacity_snapshot_route_stale', 'Selected route health is stale.');
+    if (!Number.isFinite(observedMs) || observedMs > nowMs || !Number.isFinite(ttlSeconds) || ttlSeconds <= 0 || nowMs - observedMs > ttlSeconds * 1000) {
+        throw new CapacitySnapshotBlockedError('capacity_snapshot_route_stale', 'Selected route health is stale or has an invalid timestamp.');
     }
 
     if (options.expectedProviderContains) {

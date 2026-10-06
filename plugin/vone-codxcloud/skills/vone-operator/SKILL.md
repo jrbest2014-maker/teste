@@ -18,8 +18,9 @@ V-ONE Master is the canonical authority. The current model/runtime is a worker o
 - When the canonical secure MCP is unavailable, use the public bootstrap only for read-only status/capacity, then fall back to the local V-ONE proxy if appropriate. Do not silently downgrade security or policy.
 
 ## Preferred MCP surfaces
-1. Canonical secure: `https://vone-control-plane.vone-technology.workers.dev/mcp`
-2. Public bootstrap, read-only subset: `https://vone-control-plane.vone-technology.workers.dev/mcp-public`
-3. Local compatibility proxy: configured locally as `v-one`
+1. Canonical ingress: `https://v-one-control-plane-2dahia.v2.appdeploy.ai/mcp`
+2. Cloudflare diagnostic/recovery backend: `https://vone-control-plane.vone-technology.workers.dev/mcp` (not the sole ingress)
+3. Public bootstrap, read-only status/capacity: `https://vone-control-plane.vone-technology.workers.dev/mcp-public`
+4. Local compatibility proxy: configured locally as `v-one`
 
 For code changes, use $vone-engineering. For continuity, use $vone-continuity. For release closure, use $vone-release-gate.
