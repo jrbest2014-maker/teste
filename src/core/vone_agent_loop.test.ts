@@ -114,6 +114,25 @@ async function main(): Promise<void> {
             assert.equal(caller.callCount, 3);
         }
 
+        // Local-model compatibility: tolerate a single JSON markdown fence,
+        // safe tool-name shorthand, and filePath alias without widening the
+        // allow-list or bypassing the VFS sandbox.
+        {
+            const caller = new ScriptedCaller([
+                '```json\n{"action":"write_file","arguments":{"filePath":"compat.txt","content":"compat-ok"}}\n```',
+                '{"action":"finish","summary":"compat artifact created"}',
+            ]);
+            const router = new ModelRouter([freeRoute('compat-route')], createDefaultGates(), caller);
+            const hub = new VOneUnifiedHubAgent(sandbox, router);
+            const loop = new VOneAgentLoop(hub, hydration);
+
+            const state = await loop.run('session-local-protocol-compat', 'create compatibility artifact');
+            assert.equal(state.status, 'DONE');
+            assert.equal(fs.readFileSync(path.join(tmpRoot, 'compat.txt'), 'utf8'), 'compat-ok');
+            assert.equal(state.artifacts.length, 1);
+            assert.equal(state.artifacts[0].path, 'compat.txt');
+        }
+
         // 2. PAID_BLOCKED never executes, even when it's the only route offered.
         {
             const caller = new ScriptedCaller(['{"action":"finish","summary":"unreachable"}']);
