@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { describeOwnedDesktop, estimateVram, fitsInVram } from './vone_hardware_sizing';
+import {
+    INSTALLED_OLLAMA_MODELS,
+    describeOwnedDesktop,
+    estimateVram,
+    fitsInVram,
+    recommendDefaultModel,
+} from './vone_hardware_sizing';
 
 function main(): void {
     // Reference point: a 7B model at 4 bits/weight should land close to the
@@ -45,10 +51,31 @@ function main(): void {
     assert.ok(desktop.systemRamGb > 30 && desktop.systemRamGb < 33);
     assert.ok(desktop.caveats.some((c) => /unreliable/i.test(c)));
     assert.ok(desktop.caveats.some((c) => /CPU-only/i.test(c)));
+    assert.equal(desktop.physicalCores, 4);
+    assert.equal(desktop.logicalProcessors, 8);
+    assert.ok(/i7-8650U/.test(desktop.cpuLabel));
 
     // CPU-only reality: a 7B Q4 model's footprint must comfortably fit the
     // real RAM with headroom - this is the actual sizing question now.
     assert.equal(fitsInVram(sevenB, desktop.systemRamGb, 4), true);
+
+    // The installed-model inventory must be non-empty and recommend the
+    // smallest one for CPU-only hardware - which must be v-one-coder:fast
+    // (tied in size with qwen2.5-coder:1.5b), the model already wired as
+    // the worker's default.
+    assert.ok(INSTALLED_OLLAMA_MODELS.length > 0);
+    const recommendation = recommendDefaultModel(desktop, INSTALLED_OLLAMA_MODELS);
+    assert.equal(recommendation.tag, 'v-one-coder:fast');
+    assert.ok(/4C\/8T/.test(recommendation.reason));
+
+    // A larger model in the list must not win the "smallest" pick.
+    const biasedTowardsLarge = recommendDefaultModel(desktop, [
+        { tag: 'big', sizeGb: 18 },
+        { tag: 'small', sizeGb: 0.9 },
+    ]);
+    assert.equal(biasedTowardsLarge.tag, 'small');
+
+    assert.throws(() => recommendDefaultModel(desktop, []), /no installed models/);
 
     console.log('vone_hardware_sizing: all assertions passed');
 }
