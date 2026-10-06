@@ -91,6 +91,30 @@ function main(): void {
     const stale = validSnapshot(now - 180_000);
     expectBlocked(stale, 'capacity_snapshot_stale', { nowMs: now, maxSnapshotAgeMs: 120_000 });
 
+    for (const offsetMs of [1, 60_000]) {
+        const futureObservation = structuredClone(snapshot) as any;
+        futureObservation.selected!.route.health.observed_at = new Date(now + offsetMs).toISOString();
+        expectBlocked(futureObservation, 'capacity_snapshot_route_stale', { nowMs: now });
+    }
+
+    for (const observedAt of [undefined, null, '', 'invalid-timestamp']) {
+        const invalidObservation = structuredClone(snapshot) as any;
+        invalidObservation.selected!.route.health.observed_at = observedAt;
+        expectBlocked(invalidObservation, 'capacity_snapshot_route_stale', { nowMs: now });
+    }
+
+    const missingHealth = structuredClone(snapshot) as any;
+    delete missingHealth.selected!.route.health;
+    expectBlocked(missingHealth, 'capacity_snapshot_route_stale', { nowMs: now });
+
+    const atTtlLimit = structuredClone(snapshot) as any;
+    atTtlLimit.selected!.route.health.observed_at = new Date(now - 60_000).toISOString();
+    assertVerifiedCapacitySnapshot(atTtlLimit, { nowMs: now });
+
+    const pastTtlLimit = structuredClone(atTtlLimit) as any;
+    pastTtlLimit.selected!.route.health.observed_at = new Date(now - 60_001).toISOString();
+    expectBlocked(pastTtlLimit, 'capacity_snapshot_route_stale', { nowMs: now });
+
     const paid = structuredClone(snapshot) as any;
     paid.selected!.route.cost.variable_cost_allowed = true;
     expectBlocked(paid, 'capacity_snapshot_paid_blocked', { nowMs: now });

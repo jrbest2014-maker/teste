@@ -1,7 +1,8 @@
 {
   "version": "VONE_SKILL_REGISTRY_R1",
   "authority": "V-ONE Master",
-  "canonical_mcp": "https://vone-control-plane.vone-technology.workers.dev/mcp",
+  "canonical_mcp": "https://v-one-control-plane-2dahia.v2.appdeploy.ai/mcp",
+  "diagnostic_mcp": "https://vone-control-plane.vone-technology.workers.dev/mcp",
   "public_bootstrap_mcp": "https://vone-control-plane.vone-technology.workers.dev/mcp-public",
   "local_credential_bridge": "C:\\Users\\User\\NEXUS-WORK-NODE\\vone-master-credential-bridge.mjs",
   "policy": {

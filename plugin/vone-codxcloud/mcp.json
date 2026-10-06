@@ -3,7 +3,7 @@
   "mcpServers": {
     "vone-master": {
       "type": "streamable-http",
-      "url": "https://vone-control-plane.vone-technology.workers.dev/mcp"
+      "url": "https://v-one-control-plane-2dahia.v2.appdeploy.ai/mcp"
     }
   }
 }

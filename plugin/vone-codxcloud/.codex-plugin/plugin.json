@@ -1,6 +1,6 @@
 {
   "name": "vone-codxcloud",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "V-ONE company engineering operator backed by the canonical V-ONE Master for execution, continuity, zero-cost routing, release validation and audited learning.",
   "author": {
     "name": "MEGA CORP FY"
@@ -9,13 +9,13 @@
   "mcpServers": {
     "vone-master": {
       "type": "streamable-http",
-      "url": "https://vone-control-plane.vone-technology.workers.dev/mcp"
+      "url": "https://v-one-control-plane-2dahia.v2.appdeploy.ai/mcp"
     }
   },
   "interface": {
     "displayName": "V-ONE CODXCLOUD",
     "shortDescription": "V-ONE company operator",
-    "longDescription": "Engineering, execution, continuity, zero-cost routing and release workflows backed by the canonical V-ONE Master Cloudflare MCP.",
+    "longDescription": "Engineering, execution, continuity, zero-cost routing and release workflows backed by the canonical V-ONE Master ingress, with Cloudflare for diagnostics and recovery.",
     "developerName": "MEGA CORP FY",
     "category": "Productivity",
     "capabilities": [
