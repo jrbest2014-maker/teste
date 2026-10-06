@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint"
+  ],
+  "unwantedRecommendations": [
+    "esbenp.prettier-vscode",
+    "github.copilot",
+    "github.copilot-chat"
+  ]
+}
