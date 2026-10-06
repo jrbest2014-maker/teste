@@ -99,7 +99,15 @@ async function main(): Promise<void> {
         // 5. The state root must be outside the project root.
         {
             const project = path.join(tmp, 'p');
-            assert.equal(resolveExecutorStateRoot(project, 'W 1/x', undefined, '/home/u'), path.join('/home/u', '.vone', 'state', 'W_1_x'));
+            // resolveExecutorStateRoot path.resolve()s its result (so later path.relative
+            // comparisons are unambiguous) - the expected value must too, or this only
+            // passes by accident on POSIX, where resolve() of an already-absolute path is
+            // a no-op. On Windows, resolve() prepends the current drive letter to a
+            // drive-relative input like "\home\u\...", which is exactly what should happen.
+            assert.equal(
+                resolveExecutorStateRoot(project, 'W 1/x', undefined, '/home/u'),
+                path.resolve(path.join('/home/u', '.vone', 'state', 'W_1_x')),
+            );
             assert.equal(resolveExecutorStateRoot(project, 'w', path.join(tmp, 'state'), '/home/u'), path.join(tmp, 'state'));
             for (const inside of [project, path.join(project, '.vone-state'), path.join(project, 'a', '..', 'b')]) {
                 assert.throws(() => resolveExecutorStateRoot(project, 'w', inside, '/home/u'), /must_be_outside/);
