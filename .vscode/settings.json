@@ -45,5 +45,28 @@
   "extensions.autoUpdate": false,
   "extensions.autoCheckUpdates": false,
   "update.mode": "manual",
-  "telemetry.telemetryLevel": "off"
+  "telemetry.telemetryLevel": "off",
+
+  // --- V-ONE Studio: rebranding visual deste workspace ---
+  // Efeito imediato, sem precisar instalar nada: colorCustomizations é lido
+  // direto do settings.json. O tema completo instalável (editor/vone-studio-theme)
+  // é opcional - ver docs/v-one-studio-setup.md. Isto NÃO altera nenhum gate,
+  // limite ou autenticação de ferramenta nenhuma (Codex/Copilot continuam com
+  // seus próprios limites reais, intocados).
+  "window.title": "V-ONE Studio — ${activeEditorShort}${separator}${rootName}",
+  "workbench.colorTheme": "V-ONE Studio",
+  "workbench.colorCustomizations": {
+    "focusBorder": "#F2B134",
+    "activityBar.background": "#0E0E0E",
+    "activityBarBadge.background": "#F2B134",
+    "activityBarBadge.foreground": "#121212",
+    "statusBar.background": "#0E0E0E",
+    "statusBar.debuggingBackground": "#F2B134",
+    "statusBar.debuggingForeground": "#121212",
+    "titleBar.activeBackground": "#0E0E0E",
+    "titleBar.activeForeground": "#E8E6E3",
+    "tab.activeBorderTop": "#F2B134",
+    "button.background": "#F2B134",
+    "button.foreground": "#121212"
+  }
 }
