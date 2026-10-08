@@ -114,3 +114,38 @@ trabalho diário. Quando o Codex bate no limite dele, ele continua
 voltando sozinho no horário de reset dele - isso nunca vai mudar por nada
 que esteja neste repositório, e não deveria: forjar isso seria quebra de
 ToS contra um serviço de terceiro, não uma melhoria do V-ONE.
+
+## 6. App standalone "V-ONE Studio.exe" - roteiro real (em andamento)
+
+Autorizado explicitamente pelo dono em 2026-10-08, sabendo do custo real em
+minutos de GitHub Actions (runner Windows conta em dobro). Diferente das
+seções 1-5 (tema + worker, já prontos), isto é um projeto grande, do
+tamanho de manter uma distribuição própria do VS Code (o precedente real é
+o VSCodium) - não cabe inteiro numa sessão. Avançando em marcos, cada um
+só começa depois do anterior dar evidência real.
+
+**Marco 1 (`.github/workflows/vone-studio-build-probe.yml`, disparo manual
+via `workflow_dispatch` - nunca automático, pra manter o gasto sob
+controle):** só prova que o `microsoft/vscode` upstream, sem nenhum patch
+nosso, compila (`npm run compile-client`) num runner `windows-latest`.
+Nenhuma marca, nenhum Copilot envolvido ainda - isola a variável antes de
+somar complexidade.
+
+**Achado real da pesquisa (2026-10-08, via `package.json` do
+`microsoft/vscode` upstream):** o Copilot hoje está embutido no build
+principal do VS Code (`compile-copilot`, `copilotRuntimeVersion`,
+`copilot:setup`, `copilot:get_token` no `package.json`) - não é mais só
+uma extensão instalável separada como presumido antes. Isso eleva o risco
+de licenciamento de "Copilot pode recusar rodar no fork" pra "o próprio
+build pode embutir código do Copilot sob os termos da Microsoft" - avaliado
+com cuidado depois que o Marco 1 confirmar que o build básico funciona.
+`innosetup` aparece nas `devDependencies` do upstream, então existe
+caminho real pra gerar instalador Windows - ainda não testado.
+
+**Próximos marcos (ainda não iniciados):** patch de marca (`product.json`:
+nome, ícone - usando `editor/vone-studio-theme/icon.svg|png` já prontos
+neste repo -, identidade do app); decisão sobre `extensionsGallery` (não
+copiar a galeria privada da Microsoft pra um fork redistribuído - usar
+Open VSX, como o VSCodium faz, documentando que o Copilot pode não estar
+disponível lá); packaging via `innosetup` pra gerar o `.exe` instalável de
+verdade.

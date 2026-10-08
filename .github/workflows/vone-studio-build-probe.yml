@@ -1,0 +1,39 @@
+name: V-ONE Studio - build probe (Milestone 1, sem marca, sem Copilot)
+
+# Primeiro passo real rumo ao app standalone "V-ONE Studio.exe" (ver
+# docs/v-one-studio-setup.md). Propósito único: provar que o VS Code puro
+# (microsoft/vscode, upstream, sem nenhum patch nosso) compila de verdade
+# num runner Windows do GitHub Actions - antes de somar marca própria ou
+# mexer em qualquer coisa relacionada a Copilot (que, descoberto agora via
+# package.json upstream, está embutido no build principal, não é mais só
+# extensão separada - risco de licenciamento maior do que o esperado,
+# avaliado à parte, depois que este probe der evidência real).
+#
+# workflow_dispatch de propósito: builds Windows custam 2x na cota de
+# minutos do GitHub Actions. Disparo manual, nunca automático em cada push,
+# pra manter o gasto sob controle explícito (mesmo princípio de
+# UNKNOWN_COST=HOLD do projeto, aplicado à infraestrutura do dono).
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe-windows-compile:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Clone upstream VS Code (shallow, sem fork, sem patch)
+        run: git clone --depth 1 https://github.com/microsoft/vscode.git vscode-src
+
+      - name: Node/npm versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies (upstream, não modificado)
+        working-directory: vscode-src
+        run: npm install
+
+      - name: Compile só o client (gulp compile) - sem tocar em compile-copilot
+        working-directory: vscode-src
+        run: npm run compile-client
