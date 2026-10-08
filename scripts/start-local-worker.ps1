@@ -78,6 +78,26 @@ if ($hash -ne $expected) {
 }
 Ok "Hash de `$env:VONE_WORKER_TOKEN confere com o documentado em AGENTS.md."
 
-# 4. Sobe o worker.
-Write-Host "[START] Subindo worker local como motor padrão do V-ONE Studio..." -ForegroundColor Yellow
-npx ts-node src/server/vone_owned_worker_main.ts
+# 4. Sobe o worker com prioridade de CPU reduzida.
+# Por quê: o worker não abre porta nenhuma (só chama 127.0.0.1:11434 e o
+# Master por HTTPS - ver docs/v-one-studio-setup.md), então não disputa
+# "porta" com nada. O que ele disputa é CPU, no seu hardware CPU-only
+# (i7-8650U, 4C/8T). Em vez de mandar processamento pra nuvem paga pra
+# "resolver" isso - o que violaria PAID_BLOCKED=INVIOLABLE e reabriria o
+# problema de limite/custo que motivou o worker local em primeiro lugar -
+# a correção real e de custo zero é baixar a prioridade do processo: o
+# worker cede CPU de bom grado pra qualquer outro app ativo (Codex
+# incluso), sem travar nada, sem gastar nada.
+Write-Host "[START] Subindo worker local (prioridade BelowNormal) como motor padrão do V-ONE Studio..." -ForegroundColor Yellow
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = "npx"
+$psi.Arguments = "ts-node src/server/vone_owned_worker_main.ts"
+$psi.UseShellExecute = $false
+$proc = [System.Diagnostics.Process]::Start($psi)
+try {
+    $proc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+    Ok "Prioridade do processo (PID $($proc.Id)) definida como BelowNormal."
+} catch {
+    Write-Host "[AVISO] Não consegui baixar a prioridade do processo - ele segue rodando em prioridade normal." -ForegroundColor Yellow
+}
+$proc.WaitForExit()
