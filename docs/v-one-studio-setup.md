@@ -70,9 +70,10 @@ linha `chatgpt/*` - confirmado 2026-10-08, 14/14 suítes passando,
 `tsc --noEmit` limpo nessa linha e na correção de checkpoint (PR #12,
 já mergeada nela).
 
-**Pelo script** (`scripts/start-local-worker.ps1`, PowerShell, falha
-fechado em cada pré-condição em vez de tentar "dar um jeito" - nunca pede
-nem imprime o valor do token, só compara hash):
+**Pelo script** - `scripts/start-local-worker.ps1` (Windows/PowerShell) ou
+`scripts/start-local-worker.sh` (Linux/macOS) - falha fechado em cada
+pré-condição em vez de tentar "dar um jeito" - nunca pede nem imprime o
+valor do token, só compara hash:
 
 ```powershell
 git checkout chatgpt/local-model-protocol-adapter-r1
@@ -81,13 +82,32 @@ $env:VONE_WORKER_TOKEN = (Get-Content <caminho do seu worker.token local> -Raw).
 scripts\start-local-worker.ps1
 ```
 
-O script confere, nessa ordem, e para com uma mensagem clara em qualquer
+```bash
+git checkout chatgpt/local-model-protocol-adapter-r1
+npm ci
+export VONE_WORKER_TOKEN="$(cat <caminho do seu worker.token local> | tr -d '[:space:]')"
+scripts/start-local-worker.sh
+```
+
+Os dois conferem, nessa ordem, e param com uma mensagem clara em qualquer
 falha: (1) o checkout tem o runtime do worker, (2) o Ollama está de pé e
-`v-one-coder:fast` está instalado, (3) o SHA-256 de `$env:VONE_WORKER_TOKEN`
-bate com `WORKER_TOKEN_SHA256` documentado em `AGENTS.md` - só então sobe o
-worker. **Este script não foi executado por mim** (esta sessão é headless,
-sem Ollama/PowerShell/Windows reais) - rode no seu desktop e me diga o que
-aconteceu, inclusive se algum passo falhar.
+`v-one-coder:fast` está instalado, (3) o SHA-256 do token bate com
+`WORKER_TOKEN_SHA256` documentado em `AGENTS.md` - só então sobe o worker,
+com prioridade de CPU reduzida (`BelowNormal` no Windows via
+`Process.PriorityClass` - chamada direta da Win32 API `SetPriorityClass`;
+`nice -n 19` no Linux/macOS via `nice(2)`/`setpriority(2)` POSIX): o
+agendador do kernel cede CPU pra qualquer outro app ativo (Codex incluso)
+automaticamente, sem travar nada, sem gastar nada, sem rota paga -
+`PAID_BLOCKED=INVIOLABLE` continua intocado.
+
+**O que validei de verdade nesta sessão (headless, sem Windows/Ollama
+reais):** a versão `.sh` eu rodei aqui - confirmei que o check 1 barra sem
+o runtime do worker presente (evidência real, não suposição), e testei a
+extração/comparação de hash isoladamente (string de teste → SHA-256
+correto, token errado → bloqueado com mensagem clara, valor do token nunca
+impresso). **O que não testei:** o processo final subindo de verdade com
+Ollama + token reais, nem a versão `.ps1` (não tenho PowerShell aqui) - rode
+no seu desktop e me diga o que aconteceu, inclusive se algum passo falhar.
 
 Passo a passo equivalente, manual, se preferir não usar o script:
 
