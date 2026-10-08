@@ -66,10 +66,33 @@ Estado real deste checkout (ver `AGENTS.md`, seção "Duas linhas de
 desenvolvimento"): esta branch (`claude/v-one-yellow-ap1-juxog9`, linha
 "núcleo") tem o model router e os gates, mas **não tem** o runtime do
 worker de desktop. O runtime real (`vone_owned_worker_main.ts`) está na
-linha `chatgpt/*`. Pra rodar o worker local no seu desktop:
+linha `chatgpt/*` - confirmado 2026-10-08, 14/14 suítes passando,
+`tsc --noEmit` limpo nessa linha e na correção de checkpoint (PR #12,
+já mergeada nela).
+
+**Pelo script** (`scripts/start-local-worker.ps1`, PowerShell, falha
+fechado em cada pré-condição em vez de tentar "dar um jeito" - nunca pede
+nem imprime o valor do token, só compara hash):
+
+```powershell
+git checkout chatgpt/local-model-protocol-adapter-r1
+npm ci
+$env:VONE_WORKER_TOKEN = (Get-Content <caminho do seu worker.token local> -Raw).Trim()
+scripts\start-local-worker.ps1
+```
+
+O script confere, nessa ordem, e para com uma mensagem clara em qualquer
+falha: (1) o checkout tem o runtime do worker, (2) o Ollama está de pé e
+`v-one-coder:fast` está instalado, (3) o SHA-256 de `$env:VONE_WORKER_TOKEN`
+bate com `WORKER_TOKEN_SHA256` documentado em `AGENTS.md` - só então sobe o
+worker. **Este script não foi executado por mim** (esta sessão é headless,
+sem Ollama/PowerShell/Windows reais) - rode no seu desktop e me diga o que
+aconteceu, inclusive se algum passo falhar.
+
+Passo a passo equivalente, manual, se preferir não usar o script:
 
 ```bash
-git checkout chatgpt/local-model-protocol-adapter-r1   # ou claude/vone-session-checkpoint-fix-r1 (correção de checkpoint já validada contra o Master)
+git checkout chatgpt/local-model-protocol-adapter-r1   # ou claude/vone-session-checkpoint-fix-r1 (já mergeada na linha acima)
 npm ci
 ollama list   # confirme que v-one-coder:fast aparece - medido: 15,88 tok/s geração / 59,3 tok/s prompt eval
               # nesse hardware (i7-8650U, CPU-only) - ver src/core/vone_hardware_sizing.ts
