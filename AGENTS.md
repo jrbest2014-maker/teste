@@ -37,7 +37,14 @@ HTTP do Master (`vone_master_worker_client.ts`), snapshot de capacidade,
 failover de inferência, dual worker, Worker Identity R1 (código morto — ver
 seção do Master). A PR #12 (`claude/vone-session-checkpoint-fix-r1`, a
 correção de dupla execução, **validada contra o Master real** em
-2026-10-06) está empilhada em cima dessa linha.
+2026-10-06) **já está mergeada** em `chatgpt/local-model-protocol-adapter-r1`
+(commit `ade9775`, confirmado 2026-10-08 via `git merge-base
+--is-ancestor`). Checkout de 2026-10-08 em ambas: 14/14 suítes passando,
+`tsc --noEmit` limpo, `npm audit` sem achados em dependências de produção
+(as 4 vulnerabilidades altas reportadas são em `sharp`/`undici`,
+transitivas via `wrangler`/`miniflare` — toolchain de dev do Cloudflare
+Worker, não código deste repositório; corrigir exige upgrade quebrando o
+`wrangler`, então não foi feito sem pedir antes).
 
 As duas linhas têm módulos com o mesmo nome e propósito parecido
 (`vone_executor.ts`, `vone_model_router.ts`) mas não são o mesmo arquivo e
