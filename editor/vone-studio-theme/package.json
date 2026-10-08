@@ -5,6 +5,7 @@
   "version": "1.0.0",
   "publisher": "v-one-local",
   "private": true,
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.70.0"
   },

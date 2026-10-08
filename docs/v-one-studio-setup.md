@@ -44,7 +44,23 @@ code --install-extension vone-studio-theme-1.0.0.vsix
 - Reabra o VS Code. Se `workbench.colorTheme` já não aplicar sozinho, use
   `Ctrl+K Ctrl+T` ("Preferences: Color Theme") e escolha "V-ONE Studio".
 
-## 3. Worker local como motor padrão
+## 3. Ícone
+
+`editor/vone-studio-theme/icon.svg` (fonte vetorial, mesma paleta âmbar) e
+`icon.png` (128x128, gerado a partir do SVG) já estão referenciados no
+`package.json` da extensão (`"icon": "icon.png"`) - aparece sozinho na
+view de Extensions do VS Code quando a extensão é instalada (seção 2).
+
+**Limite honesto:** isso é o ícone *da extensão*, não o ícone *da janela do
+VS Code* (o que aparece na barra de tarefas/alt-tab do Windows). Esse
+segundo é compilado dentro do executável do VS Code
+(`resources/win32/code.ico` no código-fonte do VS Code OSS) - trocá-lo de
+verdade exigiria buildar o VS Code inteiro a partir do fonte, não só
+instalar uma extensão. É um projeto bem maior (toolchain de build completo,
+sem atalho via workspace/extensão) - não comecei isso sem seu aval
+explícito, porque é um escopo bem diferente do resto deste doc.
+
+## 4. Worker local como motor padrão
 
 Estado real deste checkout (ver `AGENTS.md`, seção "Duas linhas de
 desenvolvimento"): esta branch (`claude/v-one-yellow-ap1-juxog9`, linha
@@ -65,7 +81,7 @@ npx ts-node src/server/vone_owned_worker_main.ts
 Dentro do V-ONE Studio, esse worker é o motor padrão: é ele que fica de pé
 o tempo todo, sem hora, sem crédito contado, porque é computação sua, local.
 
-## 4. Fronteira com Codex/Copilot (deliberada, não é limitação técnica)
+## 5. Fronteira com Codex/Copilot (deliberada, não é limitação técnica)
 
 A extensão Copilot/Codex continua exatamente como está - mesma
 autenticação, mesmo medidor, mesmo plano da sua conta OpenAI/GitHub.
