@@ -1,0 +1,51 @@
+name: V-ONE Free CI Validation
+
+on:
+  push:
+    branches:
+      - chatgpt/ci-free-dry-run-r1
+    paths:
+      - ".github/workflows/vone-free-ci-validation.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/vone-free-ci-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vone-free-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout canonical V-ONE source
+        uses: actions/checkout@v4
+        with:
+          ref: chatgpt/worker-identity-r1
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Test V-ONE safety gates
+        run: npm test
+      - name: Wrangler dry-run (never deploy)
+        run: npm run cf:dry-run
+      - name: Record validation evidence
+        if: always()
+        shell: bash
+        run: |
+          echo "## V-ONE Free CI" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Canonical source: chatgpt/worker-identity-r1" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- No Cloudflare token required; no deployment attempted." >> "$GITHUB_STEP_SUMMARY"
