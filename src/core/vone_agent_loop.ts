@@ -344,8 +344,12 @@ export class VOneAgentLoop {
 
     private parseDecision(rawText: string): DecisionParseOutcome {
         let parsed: unknown;
+        const trimmed = rawText.trim();
+        const normalized = trimmed.startsWith('```')
+            ? trimmed.replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/, '').trim()
+            : trimmed;
         try {
-            parsed = JSON.parse(rawText.trim());
+            parsed = JSON.parse(normalized);
         } catch {
             return { kind: 'invalid_json' };
         }
@@ -370,6 +374,37 @@ export class VOneAgentLoop {
                     action: 'tool',
                     toolName: candidate.toolName as AgentToolName,
                     arguments: candidate.arguments as Record<string, unknown>,
+                    idempotencyKey: typeof candidate.idempotencyKey === 'string' ? candidate.idempotencyKey : undefined,
+                },
+            };
+        }
+
+        // Local coding models commonly emit a safe shorthand such as
+        // {"action":"write_file","arguments":{"filePath":"x","content":"..."}}.
+        // Normalize only names already in the allow-list; this does not widen
+        // the tool surface or bypass the sandbox.
+        if (
+            typeof candidate.action === 'string' &&
+            ALLOWED_TOOL_NAMES.has(candidate.action) &&
+            typeof candidate.arguments === 'object' &&
+            candidate.arguments !== null
+        ) {
+            const toolName = candidate.action as AgentToolName;
+            const args = { ...(candidate.arguments as Record<string, unknown>) };
+            if (
+                (toolName === 'read_file' || toolName === 'write_file') &&
+                typeof args.path !== 'string' &&
+                typeof args.filePath === 'string'
+            ) {
+                args.path = args.filePath;
+                delete args.filePath;
+            }
+            return {
+                kind: 'decision',
+                decision: {
+                    action: 'tool',
+                    toolName,
+                    arguments: args,
                     idempotencyKey: typeof candidate.idempotencyKey === 'string' ? candidate.idempotencyKey : undefined,
                 },
             };

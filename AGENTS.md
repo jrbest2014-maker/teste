@@ -19,58 +19,60 @@ paga é selecionada automaticamente. Quando o custo é desconhecido,
 é **`PHYSICAL_OUTPUT=LOCKED`** por padrão. **`NO_EVIDENCE_NO_PASS`**: nunca
 declare algo como funcionando sem rodar e ver o resultado.
 
-## Duas linhas de desenvolvimento ainda não unificadas — leia antes de mexer
+## Linhas de desenvolvimento unificadas em 2026-10-10
 
-Isso é a coisa mais importante deste documento.
+Isso era a coisa mais importante deste documento - até ser resolvido.
 
-**Linha "núcleo"** (`claude/v-one-yellow-ap1-juxog9` e o que vem dela, como
-`claude/v-one-hard-skills-r1`, já mergeada aqui): `src/core` (agent loop,
-hub, VFS sandbox, hydration engine base, patch/gcode/tool interpreters,
-redação de segredo, catálogo de skills, dimensionamento de hardware) +
-`src/server` (model router, executor, Workers AI caller). **Não tem** worker
-de desktop nem cliente HTTP do Master.
+Até 2026-10-10 este repositório vivia em duas branches que nunca tinham
+sido comparadas de verdade: "núcleo" (`claude/v-one-yellow-ap1-juxog9`,
+tinha `src/core` + model router/executor/Workers AI caller, catálogo de
+skills, dimensionamento de hardware - **sem** worker de desktop nem
+cliente do Master) e `chatgpt/*` (`chatgpt/local-model-protocol-adapter-r1`,
+tinha o worker de desktop de verdade, cliente HTTP do Master, snapshot de
+capacidade, failover de inferência, Worker Identity R1 - **sem** skills
+nem dimensionamento de hardware). O aviso antigo dizia "não foram
+comparadas/reconciliadas" como se fosse um problema grande e arriscado.
 
-**Linha `chatgpt/*`** (começa em `chatgpt/worker-identity-r1`, passa por
-vários `chatgpt/*-r1`, chega em `chatgpt/local-model-protocol-adapter-r1`):
-tem o worker de desktop de verdade (`vone_owned_worker_main.ts`), o cliente
-HTTP do Master (`vone_master_worker_client.ts`), snapshot de capacidade,
-failover de inferência, dual worker, Worker Identity R1 (código morto — ver
-seção do Master). A PR #12 (`claude/vone-session-checkpoint-fix-r1`, a
-correção de dupla execução, **validada contra o Master real** em
-2026-10-06) **já está mergeada** em `chatgpt/local-model-protocol-adapter-r1`
-(commit `ade9775`, confirmado 2026-10-08 via `git merge-base
---is-ancestor`). Checkout de 2026-10-08 em ambas: 14/14 suítes passando,
-`tsc --noEmit` limpo, `npm audit` sem achados em dependências de produção
-(as 4 vulnerabilidades altas reportadas são em `sharp`/`undici`,
-transitivas via `wrangler`/`miniflare` — toolchain de dev do Cloudflare
-Worker, não código deste repositório; corrigir exige upgrade quebrando o
-`wrangler`, então não foi feito sem pedir antes).
+**Diff real rodado antes de mexer em qualquer coisa** (`git diff` arquivo
+por arquivo entre as duas, não suposição): dos 15 arquivos `.ts` em comum
+entre as duas linhas, **13 eram byte-idênticos**, incluindo
+`vone_executor.ts` (zero diferença). Só dois tinham divergência real, e as
+duas eram melhorias legítimas só na linha `chatgpt/*` (vindas de rodar
+contra modelo local de verdade, não teórico):
+- `vone_model_router.ts`: `SELECTABLE_STATES` inclui `FREE_QUOTA_LOW`
+  (núcleo parava de rotear cedo demais, antes da cota se esgotar de
+  verdade - ainda dentro do zero-custo, só não desperdiça capacidade
+  disponível).
+- `vone_agent_loop.ts`: tolera modelos locais que embrulham JSON em cerca
+  de markdown (` ```json ` ) e que usam `filePath` em vez de `path` - só
+  normaliza nomes já na allow-list, não abre superfície nova nem contorna
+  o sandbox (comentário original no código explica isso).
 
-As duas linhas têm módulos com o mesmo nome e propósito parecido
-(`vone_executor.ts`, `vone_model_router.ts`) mas não são o mesmo arquivo e
-não foram comparadas/reconciliadas. **Unificar as duas é uma decisão
-arquitetural grande - não faça isso sem pedir confirmação explícita ao
-dono do projeto primeiro.** Até lá, trate como dois sistemas relacionados,
-não um só.
+**O que foi unificado, na prática:** a linha `chatgpt/*` virou a base (já
+tinha tudo do núcleo quase igual, mais a parte de worker/Master de
+verdade); os arquivos exclusivos do núcleo (skills, hardware sizing,
+V-ONE Studio - tema/scripts/doc, CI, `AGENTS.md`/`CLAUDE.md`/`README.md`)
+foram trazidos por cima. `package.json` ganhou a união das duas listas de
+teste (19 arquivos) mais os scripts `cf:*`/`export:skills`. Autorizado
+explicitamente pelo dono em 2026-10-10 ("Sim unifica as duas linhas eu te
+autorizo"), depois do diff real acima confirmar que o risco era muito
+menor do que o aviso antigo sugeria. 19/19 testes passando, `tsc --noEmit`
+limpo, `npm run build` limpo.
 
-## Como rodar (linha núcleo - este checkout)
+## Como rodar
 
 ```bash
 npm ci
-npm test            # 10 suítes: core + skills + hardware
+npm test            # 19 suítes: core + skills + hardware + worker/Master (vone_local_control_plane_e2e é simulado, não é o Master real)
 npx tsc --noEmit
 npm run build
 npm run export:skills   # regenera skills/*/SKILL.md a partir de src/core/vone_skill_catalog.ts
 ```
 
-## Como rodar (linha `chatgpt/*` - worker de desktop)
-
-Isso só funciona no desktop do dono (Ollama local), não aqui:
+Worker de desktop (Ollama local) - só funciona no desktop do dono, não
+num checkout comum:
 
 ```powershell
-git checkout chatgpt/local-model-protocol-adapter-r1   # ou claude/vone-session-checkpoint-fix-r1 para a correção de checkpoint
-npm ci
-npm test             # 14 arquivos, incluindo vone_local_control_plane_e2e (simulado, não é o Master real)
 $env:VONE_WORKER_TOKEN = (Get-Content <caminho do seu worker.token> -Raw).Trim()   # ver seção "O Master" - não existe emissão self-service
 scripts\start-local-worker.ps1   # ou scripts/start-local-worker.sh no Linux/macOS - falha fechado, prioridade BelowNormal/nice -n 19
 ```
@@ -127,10 +129,11 @@ chat - compare hashes locamente quando precisar verificar um valor.
   (ver `createDefaultGates()` em `src/server/vone_model_router.ts`).
 - `NO_EVIDENCE_NO_PASS`: todo PASS citado em PR precisa de comando rodado +
   saída real, não "parece correto".
-- Mudança estrutural (merge entre as duas linhas, deploy, redesenho de
-  arquitetura, infraestrutura Cloudflare) pede confirmação explícita do
-  dono antes de executar. Manutenção, correção de bug, teste e evidência
-  não precisam dessa pausa.
+- Mudança estrutural (deploy, redesenho de arquitetura, infraestrutura
+  Cloudflare) pede confirmação explícita do dono antes de executar -
+  exemplo real: a unificação das duas linhas (seção acima) só aconteceu
+  depois do dono autorizar explicitamente em 2026-10-10. Manutenção,
+  correção de bug, teste e evidência não precisam dessa pausa.
 
 ## Skills (`skills/`)
 
