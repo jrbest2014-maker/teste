@@ -35,7 +35,8 @@ export class VOneDualWorker {
   async heartbeat():Promise<void>{
     await this.options.master.heartbeat({
       mode:'ONLINE',role:'DUAL_EXECUTOR_INFERENCE',
-      capabilities:['vone_executor_execute','vone_inference_execute'],
+      capabilities:['vone_executor_execute','vone_inference_execute','CODE_REVIEW'],
+      task_classes:['CODE_REVIEW'],
       execution_contracts:['VONE_EXECUTION_CONTRACT_R1','VONE_MASTER_INFERENCE_R1'],
       ...(this.options.heartbeatDetails??{}),
     });
