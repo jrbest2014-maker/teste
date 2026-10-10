@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Hook de pre-commit: bloqueia o commit se algum arquivo já selado
+# (.validated.sha256) foi alterado sem passar por um novo ciclo de
+# validação + scripts/seal-validated.sh.
+#
+# Instalação (cada contribuidor, uma vez por clone):
+#   git config core.hooksPath scripts/hooks
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if [[ ! -f .validated.sha256 ]]; then
+  # Nada foi selado ainda neste checkout - não há o que checar.
+  exit 0
+fi
+
+exec scripts/seal-validated.sh --check

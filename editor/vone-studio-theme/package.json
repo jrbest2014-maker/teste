@@ -1,0 +1,29 @@
+{
+  "name": "vone-studio-theme",
+  "displayName": "V-ONE Studio",
+  "description": "Tema escuro com acento âmbar para o V-ONE Studio — o VS Code rebatizado deste projeto para operar os agentes do V-ONE.",
+  "version": "1.0.0",
+  "publisher": "v-one-local",
+  "private": true,
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jrbest2014-maker/teste",
+    "directory": "editor/vone-studio-theme"
+  },
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "V-ONE Studio",
+        "uiTheme": "vs-dark",
+        "path": "./themes/v-one-studio-color-theme.json"
+      }
+    ]
+  }
+}
