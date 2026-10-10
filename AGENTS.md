@@ -170,6 +170,36 @@ Achados de bônus da mesma investigação, 2026-10-10:
   (produto totalmente diferente, gestão de frota/lavanderia, sem relação
   com o chat do V-ONE).
 
+## Bug real confirmado em 2026-10-10 (não corrigido ainda): tokens OAuth não são vinculados a `/mcp` vs `/mcp-secure`
+
+Um bug de resource-binding entre `/mcp-secure` e `/mcp` tinha sido
+relatado por outro AI numa sessão anterior; nunca foi investigado por
+falta de acesso ao código real do Master. Agora, com `src/index.js`
+completo em mãos (visto nesta sessão via Cloudflare Quick Edit), confirmado:
+é real, mas sem impacto prático hoje porque os dois endpoints fazem
+exatamente a mesma coisa.
+
+`handleOAuthToken` sempre devolve `resource: MCP_RESOURCE` (fixo,
+`.../mcp`) na resposta do token, mesmo quando o fluxo de autorização foi
+pro metadata de `/mcp-secure` (que corretamente anuncia
+`MCP_SECURE_RESOURCE` em `/.well-known/oauth-protected-resource/mcp-secure`).
+Pior: a tabela `oauth_tokens` nem tem coluna de `resource` -
+`oauthBearerAuthorized()` só confere hash, revogação e expiração, nunca
+qual recurso o token foi emitido pra acessar. Resultado: um token emitido
+em qualquer fluxo funciona igual nos dois endpoints, sem checagem de
+audience - o indicador de recurso (RFC 8707) é só decorativo.
+
+Sem impacto de segurança **hoje** porque `/mcp` e `/mcp-secure` chamam o
+mesmo `handleMcp()` com o mesmo `clientAuthorized()` - são idênticos em
+comportamento, só diferem no `oauth_resource_metadata` reportado. Importa
+se um dia os dois forem divergir (ex.: `/mcp-secure` com escopo mais
+restrito) ou se algum cliente MCP depender de audience-binding real pra
+segurança. Conserto ficaria em: adicionar coluna `resource` em
+`oauth_tokens`, gravar o recurso pedido no `/oauth/authorize`, e checar
+match em `oauthBearerAuthorized()` por endpoint - **não implementado**,
+precisa confirmação explícita antes de mexer em código de autenticação em
+produção (é mudança estrutural em segurança, não correção de bug comum).
+
 ## Gates e disciplina de evidência
 
 - `PAID_BLOCKED=INVIOLABLE`, `UNKNOWN_COST=HOLD`, `PHYSICAL_OUTPUT=LOCKED`
