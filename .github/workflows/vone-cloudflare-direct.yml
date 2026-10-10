@@ -17,10 +17,17 @@ on:
         options:
           - dry-run
           - deploy
+      # Default corrigido em 2026-10-10: chatgpt/worker-identity-r1 era o
+      # branch abandonado/desatualizado que o próprio AGENTS.md documenta
+      # como rejeitado (52/58 arquivos já redundantes, PR #15 fechada sem
+      # merge) - rodar o deploy com esse default teria publicado código
+      # velho por engano. claude/v-one-yellow-ap1-juxog9 é a linha ativa
+      # com todo o trabalho desta sessão (worker local, fix de pareamento
+      # testado, etc.), à frente de origin/main.
       source_ref:
         description: "Canonical V-ONE source"
         required: true
-        default: chatgpt/worker-identity-r1
+        default: claude/v-one-yellow-ap1-juxog9
         type: string
 
 permissions:

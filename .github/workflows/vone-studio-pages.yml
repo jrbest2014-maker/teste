@@ -1,0 +1,60 @@
+name: V-ONE Studio - publicar no GitHub Pages
+
+# Resposta a "sem Cloudflare como colocamos online?": isto publica o
+# apps/vone-studio em https://<owner>.github.io/<repo>/ usando só o
+# GitHub Pages nativo (Actions) - nenhuma credencial de Cloudflare
+# envolvida. Roda em modo mock (sem VITE_VONE_* configurada), igual ao
+# Artifact de demonstração publicado antes - ver apps/vone-studio/README.md,
+# seção "Ligando no backend real", pra ligar num backend de verdade depois.
+
+on:
+  push:
+    branches:
+      - claude/v-one-yellow-ap1-juxog9
+    paths:
+      - "apps/vone-studio/**"
+      - ".github/workflows/vone-studio-pages.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/vone-studio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/vone-studio/package-lock.json
+
+      - run: npm ci
+      - run: npm test
+      - run: npx vite build --base=/${{ github.event.repository.name }}/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/vone-studio/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
