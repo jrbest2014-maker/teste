@@ -2380,6 +2380,9 @@ async function saveMobileMessage(env,deviceId,role,content) {
 function classifyAgentIntent(prompt, body = {}) {
   if (body.execution_mode === 'OWNED_CODE_REVIEW') return 'CODE_REVIEW';
   if (body.execution_mode === 'CHAT_ONLY') return 'CHAT';
+  const raw=String(prompt||'').toLowerCase();
+  if (/(e2e|end.to.end|ponta.a.ponta)/i.test(raw)&&/(execut|valid|test|rod|inici|prossig|certific)/i.test(raw)) return 'E2E_EXECUTION';
+
   const text=String(prompt||'').toLowerCase();
   const action=['implementar','implemente','corrigir','corrija','editar','edite','alterar','altere','executar','execute','rodar','rode','construir','construa','deploy','publicar','publique','commit','patch','refatorar','refatore'].some(w=>text.includes(w));
   const code=['código','codigo','arquivo','repositório','repositorio','branch','commit','script','função','funcao','teste','typescript','javascript','python','github','executor','backend','frontend','api','plugin'].some(w=>text.includes(w));
@@ -2402,6 +2405,18 @@ async function handleMobileChat(request, env) {
   const maxTokens = Math.max(64, Math.min(Number(body.max_tokens || 900), 1400));
   await saveMobileMessage(env,device.device_id,'user',prompt);
   const agentIntent=classifyAgentIntent(prompt,body);
+  if (agentIntent === 'E2E_EXECUTION') {
+    const user=await approvedUserIdentity(request,env);
+    if (!user || !(await userHasPermission(request,env,'CODE_EXECUTE'))) return reply({ok:false,status:'HOLD',error:'code_execution_permission_required'},403);
+    const worker=await workerSnapshotByCapability(env,'vone_executor_execute');
+    const caps=worker.worker?.status?.capabilities||[];
+    const contracts=worker.worker?.status?.execution_contracts||[];
+    const verified=worker.online&&caps.includes('CODE_REVIEW')&&contracts.includes('VONE_EXECUTION_CONTRACT_R1');
+    const evidence={worker_online:worker.online,worker_id:worker.worker?.workerId||null,heartbeat_age_seconds:worker.ageSeconds,capabilities:caps,contracts,required_contract:'VONE_EXECUTION_CONTRACT_R1'};
+    const result={ok:false,status:'HOLD',intent:agentIntent,error:verified?'E2E_SUITE_NOT_REGISTERED':'NO_VERIFIED_E2E_EXECUTOR',evidence,text:'E2E not executed or certified. '+(verified?'Authenticated E2E suite not registered.':'Verified executor unavailable.')};
+    await saveMobileMessage(env,device.device_id,'assistant',result.text+' '+JSON.stringify(evidence));
+    return reply(result,409);
+  }
   if (agentIntent === 'ENGINEERING_ACTION') {
     const executor=await workerSnapshotByCapability(env,'vone_executor_execute');
     return reply({ok:false,status:'HOLD',intent:agentIntent,error:'ENGINEERING_ACTION_REQUIRES_VERIFIED_TOOL_DISPATCH',text:'Esta tarefa exige execucao real. O agente nao vai afirmar que editou, testou ou publicou sem ferramenta e evidencia. Use o modo CODE_REVIEW quando a tarefa for uma revisao de codigo; as demais ferramentas de escrita ainda precisam de contratos verificados.',tool_catalog:[{name:'vone_executor_execute',available:executor.online,scope:'CODE_REVIEW'}],evidence:{executor_online:executor.online}},409);
