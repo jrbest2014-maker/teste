@@ -20,9 +20,12 @@ npm install
 npm run dev        # abre em http://localhost:5173
 ```
 
-Por padrão a UI roda contra `MockVOneApiClient` (`src/api/client.ts`), com
-dados fixos em `src/api/mockData.ts` - dá pra navegar tudo (sessões,
-tool-calls, codespace) sem precisar do Master respondendo.
+Sem `.env.local`, a UI roda contra `MockVOneApiClient` (`src/api/client.ts`),
+com dados fixos em `src/api/mockData.ts` - dá pra navegar tudo (sessões,
+tool-calls, codespace) sem precisar do Master respondendo. Com
+`VITE_VONE_MASTER_URL`/`VITE_VONE_CLOUD_WORKER_URL` definidas (ver
+`.env.example`), fala com o backend real - detalhes de cada chamada na
+seção "Ligando no backend real" abaixo.
 
 ## As três formas
 
@@ -61,19 +64,47 @@ de release de verdade.
 
 ## Ligando no backend real
 
-`src/api/client.ts` já tem `HttpVOneApiClient`, mas sem implementação -
-documentado lá o que falta: o contrato HTTP exato do Master
-(`vone-control-plane`) não está neste repositório (ver `AGENTS.md`, seção
-"O Master" - é editado por Cloudflare Quick Edit, fora do Git). Pra ligar
-de verdade:
+`src/api/client.ts` tem `HttpVOneApiClient` implementado (não é mais
+stub). Pra ativar: copie `.env.example` pra `.env.local`, preencha as URLs,
+rode `npm run dev`. Sem nenhuma das duas variáveis, fica no mock.
 
-1. Confirmar o formato real de `/api/mobile/history` e do job
-   `vone_hub_chat` lendo o Worker ao vivo (não advinhar).
-2. Implementar os métodos de `HttpVOneApiClient` contra esse contrato.
-3. Trocar `new MockVOneApiClient()` por `new HttpVOneApiClient(...)` em
-   `src/App.tsx`.
-4. Nunca hardcodar token/credencial Cloudflare no código - injetar via
-   variável de ambiente do build (`import.meta.env`).
+Estado real de cada método, por confiança:
+
+- **`getGateStatus()` - confirmado.** Fala com
+  `src/cloudflare/vone_cloud_worker.ts` (este repositório, com teste). Zero
+  inferência.
+- **`listSessions()` - caminho confirmado, formato da resposta inferido.**
+  `GET /api/mobile/history?device_id=...` é real (AGENTS.md documenta o bug
+  corrigido nele). O parser aceita vários formatos plausíveis de linha
+  (`role`/`sender`/`author`, `content`/`text`/`message`) porque o JSON
+  exato nunca foi visto ao vivo nesta sessão.
+- **`sendMessage()` - caminho NÃO confirmado**, é um palpite
+  (`/api/mobile/chat`, convenção do endpoint irmão) guardado num campo
+  configurável (`chatEndpointPath`) fácil de corrigir numa linha.
+
+Tentei verificar os três ao vivo nesta sessão (2026-10-10) e bati em dois
+bloqueios reais e concretos, não hipotéticos:
+
+1. **Rede do ambiente bloqueia o Master.** `curl` direto pra
+   `vone-control-plane.vone-technology.workers.dev` voltou `CONNECT 403` -
+   confirmado no log do proxy (`$HTTPS_PROXY/__agentproxy/status`). Resolve
+   em Configurações do ambiente → Network access → liberar esse host.
+2. **A ponte MCP pro Master também falhou, com causa raiz real:** a
+   ferramenta `vone_status` do servidor `v-one-master-cloudflare` devolveu
+   `D1_ERROR: Your account has exceeded D1's free tier daily row write
+   limit`. O Master inteiro (D1) está sem cota de escrita hoje - reseta à
+   meia-noite UTC. Virar pra tier pago é decisão de custo do dono, nunca
+   automática (`PAID_BLOCKED=INVIOLABLE`).
+
+Testado com o Playwright contra o dev server real com as duas URLs
+configuradas: o app tenta a chamada de verdade, ela falha com
+`net::ERR_TUNNEL_CONNECTION_FAILED` (o bloqueio de rede acima), e a UI
+mostra isso num banner vermelho em vez de cair pro mock silenciosamente ou
+quebrar a tela - `App.tsx`, estado `backendError`.
+
+Assim que (1) ou (2) abrir, uma sessão com acesso confirma o shape real do
+histórico e do envio contra o Worker ao vivo e corrige qualquer campo que
+estiver errado - o código já está pronto pra rodar, só falta a rede.
 
 ## O que ainda falta (próximos passos sugeridos)
 

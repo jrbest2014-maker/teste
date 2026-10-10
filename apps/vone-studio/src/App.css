@@ -10,3 +10,29 @@
   overflow: hidden;
   position: relative;
 }
+
+.vone-backend-error {
+  display: flex;
+  align-items: center;
+  gap: var(--vone-space-3);
+  padding: var(--vone-space-2) var(--vone-space-4);
+  background: color-mix(in srgb, var(--vone-danger) 16%, var(--vone-bg-void));
+  border-bottom: 1px solid var(--vone-danger);
+  color: var(--vone-danger-strong);
+  font-size: var(--vone-text-sm);
+  font-family: var(--vone-font-mono);
+}
+
+.vone-backend-error button {
+  margin-left: auto;
+  padding: 2px var(--vone-space-3);
+  border: 1px solid var(--vone-danger-strong);
+  border-radius: var(--vone-radius-sm);
+  color: var(--vone-danger-strong);
+  flex-shrink: 0;
+}
+
+.vone-backend-error button:hover {
+  background: var(--vone-danger-strong);
+  color: var(--vone-fg-on-accent);
+}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MockVOneApiClient, type VOneApiClient } from './api/client';
+import { HttpVOneApiClient, MockVOneApiClient, type VOneApiClient } from './api/client';
+import { getOrCreateDeviceId } from './api/deviceId';
 import type { ChatMessage, GateStatus, Session, Workspace } from './types/vone';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -7,7 +8,16 @@ import { ChatPanel } from './components/ChatPanel';
 import { CodespacePanel } from './components/CodespacePanel';
 import './App.css';
 
-const api: VOneApiClient = new MockVOneApiClient();
+const masterUrl = import.meta.env.VITE_VONE_MASTER_URL as string | undefined;
+const cloudWorkerUrl = import.meta.env.VITE_VONE_CLOUD_WORKER_URL as string | undefined;
+const usingLiveBackend = Boolean(masterUrl || cloudWorkerUrl);
+
+// Sem nenhuma VITE_VONE_* configurada, fica no mock (navegável, sem rede).
+// Com qualquer uma configurada, fala com o backend real - ver
+// src/api/client.ts pro que está confirmado vs. inferido em cada chamada.
+const api: VOneApiClient = usingLiveBackend
+  ? new HttpVOneApiClient({ masterUrl, cloudWorkerUrl, deviceId: getOrCreateDeviceId() })
+  : new MockVOneApiClient();
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -18,17 +28,24 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 960);
   const [codespaceOpen, setCodespaceOpen] = useState(() => window.innerWidth > 1200);
   const [sending, setSending] = useState(false);
+  const [backendError, setBackendError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.listSessions().then((list) => {
-      setSessions(list);
-      setActiveSessionId((current) => current ?? list[0]?.id ?? null);
-    });
+    api
+      .listSessions()
+      .then((list) => {
+        setSessions(list);
+        setActiveSessionId((current) => current ?? list[0]?.id ?? null);
+      })
+      .catch((error: unknown) => setBackendError(`histórico: ${(error as Error).message}`));
     api.listWorkspaces().then((list) => {
       setWorkspaces(list);
       setActiveWorkspaceId((current) => current ?? list[0]?.id ?? null);
     });
-    api.getGateStatus().then(setGates);
+    api
+      .getGateStatus()
+      .then(setGates)
+      .catch((error: unknown) => setBackendError((prev) => prev ?? `gates: ${(error as Error).message}`));
   }, []);
 
   const activeSession = useMemo(
@@ -64,6 +81,8 @@ export default function App() {
       setSessions((prev) =>
         prev.map((s) => (s.id === activeSession.id ? { ...s, messages: [...s.messages, reply] } : s)),
       );
+    } catch (error) {
+      setBackendError(`envio: ${(error as Error).message}`);
     } finally {
       setSending(false);
     }
@@ -100,6 +119,14 @@ export default function App() {
         route={lastRoute}
         gates={gates ?? { paidBlocked: 'INVIOLABLE', unknownCost: 'HOLD', physicalOutput: 'LOCKED' }}
       />
+      {backendError && (
+        <div className="vone-backend-error" role="alert">
+          Backend real falhou ({backendError}) - sem fallback silencioso pro mock.
+          <button type="button" onClick={() => setBackendError(null)}>
+            ok
+          </button>
+        </div>
+      )}
       <div className="vone-app__body">
         <Sidebar
           workspaces={workspaces}
