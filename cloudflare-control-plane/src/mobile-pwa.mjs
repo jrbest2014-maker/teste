@@ -179,6 +179,7 @@ export async function mobileWhoAmI(request, env) {
     ok: true,
     device: {
       device_id: device.device_id,
+      user_id: device.user_id || null,
       label: device.label,
       access_expires_at: device.access_expires_at
     }
@@ -233,7 +234,7 @@ export function mobileIcon() {
 
 export function mobileServiceWorker() {
   return text(`
-const CACHE='vone-mobile-r4';
+const CACHE='vone-mobile-r5';
 const SHELL=['/vone-mobile','/vone-mobile/manifest.webmanifest','/vone-mobile/icon.svg'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL))));
 self.addEventListener('activate',e=>e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('vone-mobile-')&&k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));
@@ -308,15 +309,18 @@ body{background:#070b12}.workspace-rail{position:fixed;inset:0 auto 0 0;width:23
 <div id="chat" class="chat"></div>
 <div class="composer"><textarea id="prompt" rows="1" placeholder="Fale com o V-ONE Master…"></textarea><button id="send" class="send">Enviar</button></div>
 </main>
-<div class="footer"><span id="deviceLabel">iPhone/iPad</span><button id="disconnect" class="link">Desconectar</button></div>
+<div class="footer"><span id="deviceLabel">Dispositivo conectado</span><button id="disconnect" class="link">Desconectar</button></div>
 <div class="install">No Safari: Compartilhar → <b>Adicionar à Tela de Início</b>. Depois o V-ONE abre como app próprio.</div>
 </div>
-</div><div id="pairOverlay" class="overlay hide"><div class="pair"><h2>Conectar este iPhone</h2><p>O V-ONE criou um pedido seguro de pareamento. A aprovação acontece no Control Plane; nenhuma chave precisa ser digitada aqui.</p><p><a href="/vone-access" style="color:#b8ff94">Entrar ou criar conta</a> · <a href="/vone-admin" style="color:#b8ff94">Painel administrativo</a></p><div id="pairCode" class="code">------</div><div id="pairStatus" class="wait">Aguardando aprovação…</div></div></div>
+</div><div id="pairOverlay" class="overlay hide"><div class="pair"><h2>Conectar este dispositivo</h2><p>O V-ONE criou um pedido seguro de pareamento. A aprovação acontece no Control Plane; nenhuma chave precisa ser digitada aqui.</p><p><a href="/vone-access" style="color:#b8ff94">Entrar ou criar conta</a> · <a href="/vone-admin" style="color:#b8ff94">Painel administrativo</a></p><div id="pairCode" class="code">------</div><div id="pairStatus" class="wait">Aguardando aprovação…</div></div></div>
 <script>
 const $=id=>document.getElementById(id);
 const enc=new TextEncoder();
-const store=(()=>{try{const s=window.localStorage;const k='vone.storage.probe';s.setItem(k,'1');s.removeItem(k);return s}catch{return {getItem:()=>null,setItem:()=>{},removeItem:()=>{}}}})();
-const state={deviceId:store.getItem('vone.device')||'',secret:store.getItem('vone.secret')||'',ready:false,flushing:false};
+const rawStore=(()=>{try{const s=window.localStorage;const k='vone.storage.probe';s.setItem(k,'1');s.removeItem(k);return s}catch{return {getItem:()=>null,setItem:()=>{},removeItem:()=>{}}}})();
+let accountScope='';
+const store={getItem:k=>accountScope?rawStore.getItem('vone.account.'+accountScope+'.'+k):null,setItem:(k,v)=>{if(accountScope)rawStore.setItem('vone.account.'+accountScope+'.'+k,v)},removeItem:k=>{if(accountScope)rawStore.removeItem('vone.account.'+accountScope+'.'+k)}};
+const state={deviceId:'',secret:'',ready:false,flushing:false};
+async function loadAccountIdentity(){const r=await fetch('/api/accounts/me',{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('account_login_required');const j=await r.json();if(!j.user||j.user.status!=='APPROVED'||!j.user.id)throw Error('approved_account_required');accountScope=String(j.user.id);state.deviceId=store.getItem('vone.device')||'';state.secret=store.getItem('vone.secret')||'';if(!state.secret){const oldSecret=rawStore.getItem('vone.secret');const oldId=rawStore.getItem('vone.device');if(oldSecret&&oldId){try{const m=await fetch('/api/mobile/me',{headers:{authorization:'Bearer '+oldSecret},credentials:'same-origin',cache:'no-store'});const data=await m.json();if(m.ok&&data.ok&&String(data.device?.user_id||'')===accountScope){state.secret=oldSecret;state.deviceId=oldId;store.setItem('vone.secret',oldSecret);store.setItem('vone.device',oldId)}}catch{}}}return j.user}
 function b64url(bytes){let s='';bytes.forEach(b=>s+=String.fromCharCode(b));return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}
 async function hashHex(s){const d=await crypto.subtle.digest('SHA-256',enc.encode(s));return [...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
 function makeIdentity(){if(!state.deviceId)state.deviceId='ios-'+crypto.randomUUID();if(!state.secret){const b=new Uint8Array(32);crypto.getRandomValues(b);state.secret=b64url(b)}store.setItem('vone.device',state.deviceId);store.setItem('vone.secret',state.secret)}
@@ -338,7 +342,8 @@ async function send(){const p=$('prompt').value.trim();if(!p||!state.ready)retur
 $('send').addEventListener('click',send);$('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 $('disconnect').addEventListener('click',async()=>{if(state.secret)await fetch('/api/mobile/disconnect',{method:'POST',headers:auth()}).catch(()=>{});store.removeItem('vone.secret');store.removeItem('vone.device');store.removeItem('vone.history');store.removeItem('vone.queue');location.reload()});
 window.addEventListener('online',()=>{refreshStatus();flushQueue()});window.addEventListener('offline',()=>{$('net').textContent='OFFLINE';$('net').className='badge'});
-(async()=>{loadHistory();refreshStatus();if('serviceWorker'in navigator)navigator.serviceWorker.register('/vone-mobile/sw.js').catch(()=>{});makeIdentity();if(await who()){state.ready=true;flushQueue()}else await enroll()})();
+(async()=>{refreshStatus();if('serviceWorker'in navigator)navigator.serviceWorker.register('/vone-mobile/sw.js').catch(()=>{});try{await loadAccountIdentity()}catch{$('pairOverlay').classList.remove('hide');$('pairStatus').textContent='Entre com sua conta aprovada antes de conectar este dispositivo.';return}loadHistory();makeIdentity();if(await who()){state.ready=true;flushQueue()}else await enroll()})();
+window.addEventListener('focus',async()=>{if(!accountScope)return;try{const r=await fetch('/api/accounts/me',{credentials:'same-origin',cache:'no-store'});const j=await r.json();if(!r.ok||String(j.user?.id||'')!==accountScope){state.ready=false;location.reload()}}catch{}});
 // Workspace navigation is presentation-only; chat authentication and API remain unchanged.
 (function(){const rail=document.getElementById('workspaceRail'),content=document.getElementById('workspaceContent'),view=document.getElementById('workspaceView');const close=()=>rail.classList.remove('open');const select=(id)=>{document.querySelectorAll('.rail-action').forEach(x=>x.classList.toggle('selected',x.id===id));close()};document.getElementById('railToggle').addEventListener('click',()=>rail.classList.toggle('open'));document.getElementById('railChat').addEventListener('click',()=>{select('railChat');view.classList.remove('open');content.classList.remove('viewing')});document.getElementById('railHistory').addEventListener('click',()=>{select('railHistory');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();const h=document.createElement('h2');h.textContent='Histórico de execução';const p=document.createElement('p');p.textContent='Mensagens persistidas na Cloudflare D1 para este dispositivo autorizado. A sincronização entre contas e dispositivos distintos ainda não está habilitada.';const b=document.createElement('button');b.textContent='Voltar à conversa';b.onclick=()=>document.getElementById('railChat').click();view.append(h,p,b)});document.getElementById('railTools').addEventListener('click',()=>{select('railTools');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();const h=document.createElement('h2');h.textContent='Ferramentas do Master';const p=document.createElement('p');p.textContent='Consultas verificáveis com autorização do dispositivo. Nenhuma rota paga ou execução privilegiada é ativada por estes atalhos.';view.append(h,p);for(const [label,cmd] of [['Estado do Master','/status'],['Planejamento de capacidade','/capacidade']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>{document.getElementById('railChat').click();document.getElementById('prompt').value=cmd;document.getElementById('send').click()};view.appendChild(b)}})})();
 </script>
