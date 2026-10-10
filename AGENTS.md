@@ -123,6 +123,83 @@ token no chat; compare hashes, não valores.**
 ID) nesta sessão.** Nunca cole token (worker ou Cloudflare) de volta no
 chat - compare hashes locamente quando precisar verificar um valor.
 
+## Bug real corrigido em 2026-10-10: `/vone-mobile` sem histórico de conversa
+
+O chat do `/vone-mobile` às vezes respondia com saudação genérica
+("Claro! Como posso ajudar você hoje?") ignorando completamente o que o
+usuário tinha acabado de escrever - sobretudo em mensagens de continuação
+("vamos nos aprofundar nesse assunto"). Causa raiz confirmada com dado
+real, não suposição: em `handleMobileChat` (`src/index.js` do Worker
+`vone-control-plane` - **não versionado em nenhum Git**, só existe no
+editor ao vivo da Cloudflare), o job `vone_hub_chat` era montado só com a
+última mensagem isolada (`prompt`), sem puxar nada de
+`mobile_chat_messages`. Confirmado lendo `jobs.args` reais via
+`npx wrangler d1 execute vone-control-plane --remote --command "SELECT id,
+args FROM jobs WHERE tool_name='vone_hub_chat' ORDER BY created_at DESC
+LIMIT 1;"` antes da correção - o `prompt` chegava pelado no modelo, por
+isso respostas que dependiam de contexto anterior saíam genéricas.
+
+Corrigido direto no Quick Edit da Cloudflare (não passa por este
+repositório, porque o código do Master não está aqui): antes de montar o
+job, busca as últimas 12 linhas de `mobile_chat_messages` daquele
+`device_id`, remove a duplicata da mensagem recém-salva (comparando
+conteúdo, já que `saveMobileMessage` já rodou antes nesse mesmo request) e
+monta um prompt tipo `"Usuario: ...\nAssistente: ...\nUsuario: <mensagem
+nova>"`. Confirmado funcionando com a mesma consulta D1 depois do deploy -
+o `prompt` do job mais recente veio com o histórico inteiro formatado,
+terminando na mensagem nova, sem duplicação. **Esse fix só existe no
+Worker deployado agora - não tem commit em lugar nenhum, porque não existe
+onde versionar o código do Master.**
+
+Achados de bônus da mesma investigação, 2026-10-10:
+- A etiqueta "Cloudflare D1" que aparece em toda mensagem no app mobile
+  não indica rota nem falha - é só um rótulo fixo que o cliente cola em
+  qualquer mensagem carregada via `syncCloudHistory()`/`/api/mobile/history`,
+  sempre, nova ou antiga. Não é diagnóstico de nada, é inofensivo.
+- `DESKTOP_445339E_VONE_EXECUTOR_01` (documentado acima como aposentado,
+  token irrecuperável) segue processando jobs reais em produção agora -
+  contradiz a narrativa de "aposentado" acima. Não investigado por quê; o
+  worker configurado nesta sessão usa `_02`, então deve haver outra
+  instância rodando em algum lugar com token válido pro `_01`. Em aberto.
+- V-ONE e o "NEXUS" (arquivos de um projeto separado mencionados em sessão
+  anterior) são do mesmo dono: a conta GitHub `juniorconectfy-max`
+  (diferente de `jrbest2014-maker`, sem acesso desta sessão) tem o repo
+  `refresh-fy-studio-5d` (provável fonte real do V-ONE Studio/IDE, com
+  `.nexus-tools/vone-edge` - um Worker Cloudflare separado,
+  `vone-control-plane-edge`, quase vazio, não é o Master) e `NEXUS-LIFE-OS`
+  (produto totalmente diferente, gestão de frota/lavanderia, sem relação
+  com o chat do V-ONE).
+
+## Bug real confirmado em 2026-10-10 (não corrigido ainda): tokens OAuth não são vinculados a `/mcp` vs `/mcp-secure`
+
+Um bug de resource-binding entre `/mcp-secure` e `/mcp` tinha sido
+relatado por outro AI numa sessão anterior; nunca foi investigado por
+falta de acesso ao código real do Master. Agora, com `src/index.js`
+completo em mãos (visto nesta sessão via Cloudflare Quick Edit), confirmado:
+é real, mas sem impacto prático hoje porque os dois endpoints fazem
+exatamente a mesma coisa.
+
+`handleOAuthToken` sempre devolve `resource: MCP_RESOURCE` (fixo,
+`.../mcp`) na resposta do token, mesmo quando o fluxo de autorização foi
+pro metadata de `/mcp-secure` (que corretamente anuncia
+`MCP_SECURE_RESOURCE` em `/.well-known/oauth-protected-resource/mcp-secure`).
+Pior: a tabela `oauth_tokens` nem tem coluna de `resource` -
+`oauthBearerAuthorized()` só confere hash, revogação e expiração, nunca
+qual recurso o token foi emitido pra acessar. Resultado: um token emitido
+em qualquer fluxo funciona igual nos dois endpoints, sem checagem de
+audience - o indicador de recurso (RFC 8707) é só decorativo.
+
+Sem impacto de segurança **hoje** porque `/mcp` e `/mcp-secure` chamam o
+mesmo `handleMcp()` com o mesmo `clientAuthorized()` - são idênticos em
+comportamento, só diferem no `oauth_resource_metadata` reportado. Importa
+se um dia os dois forem divergir (ex.: `/mcp-secure` com escopo mais
+restrito) ou se algum cliente MCP depender de audience-binding real pra
+segurança. Conserto ficaria em: adicionar coluna `resource` em
+`oauth_tokens`, gravar o recurso pedido no `/oauth/authorize`, e checar
+match em `oauthBearerAuthorized()` por endpoint - **não implementado**,
+precisa confirmação explícita antes de mexer em código de autenticação em
+produção (é mudança estrutural em segurança, não correção de bug comum).
+
 ## Gates e disciplina de evidência
 
 - `PAID_BLOCKED=INVIOLABLE`, `UNKNOWN_COST=HOLD`, `PHYSICAL_OUTPUT=LOCKED`
