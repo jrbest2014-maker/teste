@@ -26,6 +26,11 @@ function required(name: string): string {
     return value;
 }
 
+function positiveIntFromEnv(name: string, fallbackMs: number): number {
+    const raw = Number(process.env[name]?.trim());
+    return Number.isFinite(raw) && raw > 0 ? raw : fallbackMs;
+}
+
 async function main(): Promise<void> {
     const masterUrl = process.env.VONE_MASTER_URL?.trim() || 'https://vone-control-plane.vone-technology.workers.dev';
     // _01 is retired: the Master has an IDENTITY_R1 record (generation 2) registered
@@ -89,10 +94,22 @@ async function main(): Promise<void> {
         },
     });
 
+    // Intervalos conservadores por padrão: a cada 5s de heartbeat + 1.5s de
+    // poll, dois workers (01 e 02, ambos ativos em produção - ver AGENTS.md)
+    // somam ~150 mil requisições/dia pro Master, cada uma plausivelmente
+    // gravando no D1 (last_seen do heartbeat, job claim do poll). O D1
+    // free tier tem teto diário de escrita - confirmado ao vivo em
+    // 2026-10-10 (D1_ERROR: daily row write limit excedido, Master preso
+    // em HOLD/OFFLINE no meio do dia). Isso não desafoga a cota já gasta
+    // hoje (só reseta à meia-noite UTC), mas reduz a pressão futura.
+    // Configurável via env pra quem precisar de latência mais baixa.
+    const heartbeatIntervalMs = positiveIntFromEnv('VONE_HEARTBEAT_INTERVAL_MS', 30_000);
+    const pollIntervalMs = positiveIntFromEnv('VONE_POLL_INTERVAL_MS', 5_000);
+
     await worker.heartbeat();
     setInterval(() => worker.heartbeat().catch((error) => {
         console.error('HEARTBEAT_ERROR', error instanceof Error ? error.message : String(error));
-    }), 5_000).unref();
+    }), heartbeatIntervalMs).unref();
 
     console.log(JSON.stringify({
         service: 'V-ONE Owned Executor Worker',
@@ -105,6 +122,8 @@ async function main(): Promise<void> {
         projectRoot,
         stateRoot,
         gates,
+        heartbeatIntervalMs,
+        pollIntervalMs,
     }));
 
     while (true) {
@@ -114,7 +133,7 @@ async function main(): Promise<void> {
         } catch (error) {
             console.error('WORKER_LOOP_ERROR', error instanceof Error ? error.message : String(error));
         }
-        await sleep(1_500);
+        await sleep(pollIntervalMs);
     }
 }
 
