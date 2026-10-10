@@ -85,13 +85,22 @@ com a rota `CLOUD_ONLY` do Master - sem esse Master de pé, cai inteiro pra
 esse problema: fica de pé enquanto o processo do worker próprio estiver
 rodando, Master saudável ou não.
 
-Pra ativar: suba o worker (`ts-node src/server/vone_owned_worker_main.ts`
-na raiz do repo, com `VONE_WORKER_TOKEN` configurado), copie
-`host`/`port`/`auth_token` do bloco `local_chat_server` que ele imprime ao
-subir pra `VITE_VONE_LOCAL_URL`/`VITE_VONE_LOCAL_TOKEN` em `.env.local`
-deste app, rode `npm run dev`. Contrato 100% confirmado - servidor e
-cliente escritos e testados juntos nesta sessão
-(`vone_local_chat_server.test.ts`), testado de ponta a ponta com
+Pra ativar, duas formas:
+
+- **Com o worker completo** (também atende jobs do Master quando ele
+  estiver saudável): `ts-node src/server/vone_owned_worker_main.ts` na
+  raiz do repo, exige `VONE_WORKER_TOKEN` configurado.
+- **Só o chat local, sem token nenhum** (`npm run local-chat` na raiz do
+  repo) - `src/server/vone_local_only_main.ts` sobe só o
+  `VOneLocalChatServer`, sem nenhuma conexão com o Master. Pra quem não
+  tem (ou perdeu) o `VONE_WORKER_TOKEN` - esse token só serve pra
+  autenticar contra o Master, nunca foi necessário pro chat local em si.
+
+Os dois imprimem o mesmo bloco `local_chat_server` (`host`/`port`/
+`auth_token`) ao subir - copia pra `VITE_VONE_LOCAL_URL`/
+`VITE_VONE_LOCAL_TOKEN` em `.env.local` deste app, roda `npm run dev`.
+Contrato 100% confirmado - servidor e cliente escritos e testados juntos
+nesta sessão (`vone_local_chat_server.test.ts`), testado de ponta a ponta com
 Playwright contra servidor real + browser real (mensagem enviada,
 resposta renderizada, zero erro de console, zero banner de erro).
 
