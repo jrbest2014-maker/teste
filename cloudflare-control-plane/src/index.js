@@ -2362,6 +2362,9 @@ async function handleMobileTool(request, env) {
       return {name:d.name,description:d.description,mode:readOnly?'READ_ONLY':'MUTATING',state:allowed?(readOnly?'MCP_ONLY':'MCP_ONLY_VERIFICATION_REQUIRED'):'PERMISSION_DENIED',permission};
     }));
     tools.push({name:'vone_executor_execute',description:'Owned Executor native CODE_REVIEW via mobile chat execution mode',mode:'EXECUTION',state:!codeAllowed?'PERMISSION_DENIED':codeReady?'EXECUTOR_VERIFIED':'HOLD_NO_VERIFIED_EXECUTOR',permission:'CODE_REVIEW',evidence:{worker_online:worker.online,worker_id:worker.worker?.workerId||null,heartbeat_age_seconds:worker.ageSeconds,capabilities:caps,contracts}});
+    const hub=await workerSnapshotByCapability(env,'vone_hub_chat');
+    const hubReady=hub.online&&(hub.worker?.status?.execution_contracts||[]).includes('VONE_HUB_CHAT_R1')&&hub.worker?.status?.ollama_health==='ONLINE';
+    tools.push({name:'vone_hub_chat',description:'V-ONE Unified Hub Agent + ModelRouter, local verified chat',mode:'INFERENCE',state:hubReady?'EXECUTOR_VERIFIED':'HOLD_NO_VERIFIED_HUB',permission:'TOOLS_READ',evidence:{worker_online:hub.online,worker_id:hub.worker?.workerId||null,heartbeat_age_seconds:hub.ageSeconds,model:hub.worker?.status?.model||null}});
     return reply({ok:true,tool:name,scope:'mobile-workspace',execution_policy:'verified-only',cost_policy:{paid:'BLOCKED',unknown:'HOLD'},tools});
   }
   return reply({ok:false,error:'tool_not_allowed'},403);
