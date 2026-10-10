@@ -224,3 +224,52 @@ i7-8650U (4C/8T), ~32GB RAM. Modelo padrão `v-one-coder:fast`
 (~1,5B, medido: 15,88 tok/s geração). Ver
 `src/core/vone_hardware_sizing.ts` (`describeOwnedDesktop()`,
 `MEASURED_BENCHMARKS`).
+
+## Decisão de roteamento em 2026-10-10: Cloudflare é o motor grande, desktop é só PRIVATE
+
+Esse hardware não roda modelo grande (300B) de jeito nenhum - não é
+configuração, é teto físico: só os pesos em 4-bit já passam de 150GB, a
+máquina tem ~32GB de RAM total, sem GPU. Por isso `recommendDefaultModel()`
+em `vone_hardware_sizing.ts` escolhe de propósito o **menor** modelo
+instalado, não o maior.
+
+Decisão explícita do dono: não precisa resolver isso no desktop. A rota
+`cloudflare-workers-ai-primary` já serve `@cf/nvidia/nemotron-3-120b-a12b`
+(perfil SMART/MAX) de graça, sempre ligada, sem depender do desktop estar
+ligado (ver `yellow_status` no Master). O desktop/Ollama fica **só** para
+tarefa `privacy_class: PRIVATE`, que o Cloudflare é bloqueado de receber de
+propósito (`PRIVACY_MISMATCH` em `vone_capacity_snapshot.ts` quando a rota
+não lista a classe de privacidade pedida em `allowed_privacy_classes`).
+Quando o desktop está desligado, tarefa PRIVATE fica em `HOLD` (fila), não
+falha nem vaza pra nuvem - é o comportamento correto sob
+`PAID_BLOCKED=INVIOLABLE` (não dá pra "resolver" disponibilidade botando
+servidor pago sempre ligado), não um bug.
+
+**Causa raiz separada, real, do `CAPABILITY_MISMATCH` na rota
+`client-desktop-vone-primary`:** o worker ao vivo está rodando em
+`auth_mode=LEGACY_COMPAT` (`identity_generation=null`), com `capabilities`
+no formato antigo (nomes de ferramenta: `ask_yellow`, `yellow_route_preview`,
+`yellow_status`) em vez do formato novo `task_classes` (`LLM_FAST` etc.)
+que `vone_capacity_plan`/`VONE_CAPACITY_SNAPSHOT_R1` exige. Não é falta de
+código - `vone_worker_identity.ts` e o fluxo de identidade em
+`vone_owned_worker_main.ts` já estão em `main`, mais evoluídos que nos
+branches `chatgpt/worker-identity-r1`/`chatgpt/local-model-protocol-adapter-r1`
+(comparação real feita nesta sessão, PR #15 fechada sem merge por isso - ver
+abaixo). É operacional: o processo do worker rodando no desktop precisa ser
+reiniciado a partir de um checkout atualizado de `main` (`scripts/
+start-local-worker.ps1`/`.sh`, corrigidos nesta sessão pra apontar pra
+`main` em vez do branch antigo) pra re-registrar com o schema novo.
+
+**PR #15** ("Implement V-ONE core agent loop, routing, and execution
+framework", branch `chatgpt/worker-identity-r1`) foi analisada arquivo por
+arquivo contra `main` pós-unificação: dos 58 arquivos de código, 52 (~89%)
+já estavam redundantes (idênticos ou `main` à frente); fechada sem merge.
+Resgatados por cherry-pick (únicos 2 módulos genuinamente novos, baixo
+risco, sem integração pendente): `src/server/vone_power_ladder.ts`
+(`PowerLadder`/`selectMonotonicPowerRoute` - seleção monotônica de rota por
+perfil FAST/SMART/MAX) e `src/server/vone_external_inference_backends.ts`
+(`OpenRouterFreeInferenceBackend`, `GroqFreeInferenceBackend`). Não
+resgatado: `cloudflare-control-plane/*` (snapshot do código do Master que
+contradiz a política acima de "Master não versionado", importa 2 arquivos
+que não existem no branch, e está desatualizado frente à versão
+`2.4.7-worker-identity-r1-compat` que já roda em produção).
