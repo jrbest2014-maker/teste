@@ -11,9 +11,13 @@
 # sem rota paga, sem reabrir o problema de limite que motivou o worker
 # local em primeiro lugar (PAID_BLOCKED=INVIOLABLE).
 #
-# Rode a partir da raiz do checkout em chatgpt/local-model-protocol-adapter-r1
-# (é onde src/server/vone_owned_worker_main.ts existe - ver AGENTS.md,
-# "Duas linhas de desenvolvimento").
+# Rode a partir da raiz do checkout em main. As linhas chatgpt/* e núcleo
+# foram unificadas em 2026-10-10 (ver AGENTS.md, "Linhas de desenvolvimento
+# unificadas em 2026-10-10") - main tem src/server/vone_owned_worker_main.ts
+# e está à frente dos branches chatgpt/* antigos (ex.: identidade/rotação de
+# token de worker mais evoluída). Rodar a partir de um checkout antigo em
+# chatgpt/local-model-protocol-adapter-r1 ou chatgpt/worker-identity-r1 sobe
+# o worker com registro de identidade/capabilities desatualizado.
 
 set -euo pipefail
 
@@ -26,14 +30,15 @@ ok() {
     echo "[OK] $1"
 }
 
-# 1. Branch certa - o runtime do worker só existe na linha chatgpt/*.
+# 1. Branch certa - o runtime do worker está em main (unificado em 2026-10-10).
 if [[ ! -f "src/server/vone_owned_worker_main.ts" ]]; then
     fail "src/server/vone_owned_worker_main.ts não existe neste checkout.
-  git checkout chatgpt/local-model-protocol-adapter-r1
+  git checkout main
+  git pull
   npm ci
 E rode este script de novo."
 fi
-ok "Checkout tem o runtime do worker (linha chatgpt/*)."
+ok "Checkout tem o runtime do worker (main, unificado)."
 
 # 2. Ollama de pé + modelo padrão instalado.
 if ! models=$(ollama list 2>/dev/null); then

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-  Sobe o worker de desktop do V-ONE (linha chatgpt/*) como motor padrão do
-  V-ONE Studio.
+  Sobe o worker de desktop do V-ONE (main, unificado em 2026-10-10) como
+  motor padrão do V-ONE Studio.
 
 .DESCRIPTION
   Falha fechado: cada pré-condição que faltar para o script e explica o que
@@ -10,9 +10,13 @@
   "O Master"), do jeito que o próprio AGENTS.md pede: "compare hashes, não
   valores".
 
-  Rode a partir da raiz do checkout em chatgpt/local-model-protocol-adapter-r1
-  (é onde src/server/vone_owned_worker_main.ts existe - ver AGENTS.md,
-  "Duas linhas de desenvolvimento").
+  Rode a partir da raiz do checkout em main. As linhas chatgpt/* e núcleo
+  foram unificadas em 2026-10-10 (ver AGENTS.md, "Linhas de desenvolvimento
+  unificadas em 2026-10-10") - main tem src/server/vone_owned_worker_main.ts
+  e está à frente dos branches chatgpt/* antigos (ex.: identidade/rotação de
+  token de worker mais evoluída). Rodar a partir de um checkout antigo em
+  chatgpt/local-model-protocol-adapter-r1 ou chatgpt/worker-identity-r1 sobe
+  o worker com registro de identidade/capabilities desatualizado.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -26,16 +30,17 @@ function Ok([string]$msg) {
     Write-Host "[OK] $msg" -ForegroundColor Green
 }
 
-# 1. Branch certa - o runtime do worker só existe na linha chatgpt/*.
+# 1. Branch certa - o runtime do worker está em main (unificado em 2026-10-10).
 if (-not (Test-Path "src/server/vone_owned_worker_main.ts")) {
     Fail (
         "src/server/vone_owned_worker_main.ts não existe neste checkout.`n" +
-        "  git checkout chatgpt/local-model-protocol-adapter-r1`n" +
+        "  git checkout main`n" +
+        "  git pull`n" +
         "  npm ci`n" +
         "E rode este script de novo."
     )
 }
-Ok "Checkout tem o runtime do worker (linha chatgpt/*)."
+Ok "Checkout tem o runtime do worker (main, unificado)."
 
 # 2. Ollama de pé + modelo padrão instalado.
 try {
