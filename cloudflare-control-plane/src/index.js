@@ -1530,7 +1530,7 @@ async function queueTool(env, toolName, args, options = {}) {
     }
     throw new Error('Worker timeout');
   } finally {
-    if (!preserveOnTimeout || terminal) {
+    if (!preserveOnTimeout || (terminal && name !== 'vone_hub_chat')) {
       await env.DB.prepare('DELETE FROM jobs WHERE id=?').bind(id).run().catch(() => {});
     }
   }
