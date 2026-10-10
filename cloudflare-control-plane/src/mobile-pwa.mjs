@@ -317,6 +317,26 @@ html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .activity-dot{height:8px;width:8px;border-radius:50%;background:#79e9c3;box-shadow:0 0 8px #79e9c355}
 .activity-strip[data-status="HOLD"] .activity-dot{background:#f7c28d}
 @media(max-width:680px){.tool-list{grid-template-columns:1fr}.workspace-content .chat{min-height:320px}}
+/* Legibilidade e layout responsivo, mantendo a paleta existente */
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{font-synthesis:none}
+.card{min-width:0}
+.card .v,.card .sub,.workspace-topbar small{overflow-wrap:anywhere;word-break:break-word}
+.card .v{line-height:1.25}
+.msg{letter-spacing:.005em}
+.meta,.sub,.small,.footer,.install{color:#b8c8e0}
+.workspace-view{overflow-wrap:anywhere}
+.workspace-view button,.rail-action{touch-action:manipulation}
+.composer textarea::placeholder{color:#aabbd3;opacity:1}
+@media(max-width:680px){
+ .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .grid .card:last-child{grid-column:1/-1}
+ .workspace-topbar{padding:0 12px}
+ .workspace-topbar strong{font-size:14px}
+ .chat{height:53dvh;min-height:320px}
+ .composer{padding:10px}
+ .card .v{font-size:17px}
+}
 </style>
 </head>
 <body>
