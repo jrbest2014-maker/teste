@@ -1508,7 +1508,8 @@ async function queueTool(env, toolName, args, options = {}) {
       if (!row) throw new Error('Job disappeared');
       if (row.status === 'done') {
         terminal = true;
-        return row.result ? JSON.parse(row.result) : {};
+        const parsed=row.result ? JSON.parse(row.result) : {};
+        return toolName==='vone_hub_chat' ? {...parsed,job_id:id} : parsed;
       }
       if (row.status === 'error') {
         terminal = true;
@@ -2380,6 +2381,13 @@ async function saveMobileMessage(env,deviceId,role,content) {
   await ensureMobileHistorySchema(env);
   await env.DB.prepare('INSERT INTO mobile_chat_messages(id,device_id,role,content,created_at) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),deviceId,role,String(content).slice(0,24000),Date.now()).run();
 }
+async function saveMobileHubReceipt(env,deviceId,jobId,content) {
+  await ensureMobileHistorySchema(env);
+  const receiptId='hub_result_'+jobId;
+  await env.DB.prepare('INSERT OR IGNORE INTO mobile_chat_messages(id,device_id,role,content,created_at) VALUES(?,?,?,?,?)').bind(receiptId,deviceId,'assistant',String(content).slice(0,24000),Date.now()).run();
+  return receiptId;
+}
+
 function classifyAgentIntent(prompt, body = {}) {
   if (body.execution_mode === 'OWNED_CODE_REVIEW') return 'CODE_REVIEW';
   if (body.execution_mode === 'CHAT_ONLY') return 'CHAT';
@@ -2456,7 +2464,7 @@ async function handleMobileChat(request, env) {
     try {
       const result=await queueTool(env,'vone_hub_chat',{protocol:'VONE_HUB_CHAT_R1',task_id:taskId,device_id:device.device_id,prompt,max_tokens:maxTokens},{preserveOnTimeout:true,timeoutMs:26000});
       if(result?.protocol==='VONE_HUB_CHAT_R1' && result.status==='DONE' && result.task_id===taskId && typeof result.text==='string' && result.text.trim()){
-        await saveMobileMessage(env,device.device_id,'assistant',result.text);
+        await saveMobileHubReceipt(env,device.device_id,result.job_id,result.text);
         return reply({ok:true,text:result.text,backend:'vone-unified-hub-agent',route:'VONE_OWNED_HUB',model:result.model||null,worker_id:result.worker_id||null,task_id:taskId,execution_verified:true});
       }
       return reply({ok:false,status:'HOLD',error:'VONE_HUB_EXECUTION_PENDING',task_id:taskId,job_id:result?.job_id||null,evidence:result?.evidence||null,text:'V-ONE Hub em execucao; resultado ainda nao verificado.'},202);
@@ -2519,7 +2527,25 @@ export default {
       if(!taskId) return reply({ok:false,error:'task_id_required'},400);
       await env.DB.prepare('CREATE TABLE IF NOT EXISTS mobile_execution_audit (task_id TEXT PRIMARY KEY,device_id TEXT NOT NULL,created_at INTEGER NOT NULL,audit_json TEXT NOT NULL)').run();
       const record=await env.DB.prepare('SELECT audit_json FROM mobile_execution_audit WHERE task_id=? AND device_id=?').bind(taskId,device.device_id).first();
-      return record?reply({ok:true,audit:JSON.parse(record.audit_json)}):reply({ok:false,error:'audit_not_found'},404);
+      if(!record)return reply({ok:false,error:'audit_not_found'},404);
+      let audit=JSON.parse(record.audit_json);
+      if(audit.status==='INCOMPLETE'&&audit.job_id){
+        const job=await env.DB.prepare('SELECT status,result,error,args,worker_id FROM jobs WHERE id=? AND tool_name=?').bind(audit.job_id,'vone_executor_execute').first();
+        if(job?.status==='done'){
+          let execution={},expected={};
+          try{execution=JSON.parse(job.result||'{}');expected=JSON.parse(job.args||'{}')}catch{}
+          const validation=validateNativeExecutionResult(execution,expected);
+          const passed=validation?.ok===true&&String(execution.status).toUpperCase()==='DONE';
+          audit={...audit,status:passed?'PASS':'FAIL',worker_id:job.worker_id||audit.worker_id,run_id:execution.run_id||null,route_id:execution.route_id||null,model:execution.model||null,local_checkpoint_revision:execution.evidence?.local_checkpoint_revision??null,validation,evidence:execution.evidence||null,error_class:passed?null:String(validation?.code||execution.error_class||'execution_unverified'),finished_at:Date.now()};
+          await env.DB.prepare('UPDATE mobile_execution_audit SET audit_json=? WHERE task_id=? AND device_id=?').bind(JSON.stringify(audit),taskId,device.device_id).run();
+          await ensureMobileHistorySchema(env);
+          await env.DB.prepare('INSERT OR IGNORE INTO mobile_chat_messages(id,device_id,role,content,created_at) VALUES(?,?,?,?,?)').bind('code_receipt_'+taskId,device.device_id,'assistant',(passed?'CODE_REVIEW PASS':'CODE_REVIEW FAIL')+' - '+JSON.stringify(audit),Date.now()).run();
+        }else if(job?.status==='error'){
+          audit={...audit,status:'FAIL',error_class:String(job.error||'worker_error').slice(0,240),finished_at:Date.now()};
+          await env.DB.prepare('UPDATE mobile_execution_audit SET audit_json=? WHERE task_id=? AND device_id=?').bind(JSON.stringify(audit),taskId,device.device_id).run();
+        }
+      }
+      return reply({ok:true,audit});
     }
     if (method === 'GET' && url.pathname === '/api/mobile/enroll/status') return mobileEnrollmentStatus(request, env);
     if (method === 'GET' && url.pathname === '/api/mobile/me') return mobileWhoAmI(request, env);
@@ -2546,9 +2572,7 @@ export default {
       if(state==='done'){
         let result={};try{result=JSON.parse(row.result||'{}')}catch{}
         if(result.protocol!=='VONE_HUB_CHAT_R1'||result.status!=='DONE'||result.task_id!==args.task_id||typeof result.text!=='string'||!result.text.trim())return reply({ok:false,status:'FAIL',error:'invalid_hub_result'},409);
-        await ensureMobileHistorySchema(env);
-        const receiptId='hub_result_'+jobId;
-        await env.DB.prepare('INSERT OR IGNORE INTO mobile_chat_messages(id,device_id,role,content,created_at) VALUES(?,?,?,?,?)').bind(receiptId,device.device_id,'assistant',result.text.slice(0,24000),Date.now()).run();
+        await saveMobileHubReceipt(env,device.device_id,jobId,result.text);
 
         return reply({ok:true,status:'PASS',text:result.text,model:result.model||null,worker_id:row.worker_id||null,task_id:args.task_id,job_id:jobId,receipt_id:'hub_result_'+jobId});
       }

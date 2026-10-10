@@ -234,9 +234,9 @@ export function mobileIcon() {
 
 export function mobileServiceWorker() {
   return text(`
-const CACHE='vone-mobile-r5';
+const CACHE='vone-mobile-r6';
 const SHELL=['/vone-mobile','/vone-mobile/manifest.webmanifest','/vone-mobile/icon.svg'];
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL))));
+self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('vone-mobile-')&&k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));
 self.addEventListener('fetch',e=>{
   if(e.request.method!=='GET') return;
@@ -337,7 +337,19 @@ body{font-synthesis:none}
  .composer{padding:10px}
  .card .v{font-size:17px}
 }
-html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}.msg{font-size:16px;line-height:1.55;text-shadow:none;filter:none}.meta{font-size:12px}@media(max-width:680px){.workspace-content .chat{height:calc(100dvh - 420px);min-height:290px}}</style>
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}.msg{font-size:16px;line-height:1.55;text-shadow:none;filter:none}.meta{font-size:12px}@media(max-width:680px){.workspace-content .chat{height:calc(100dvh - 420px);min-height:290px}}
+/* Melhorias de usabilidade sem alterar a paleta aprovada */
+.workspace-view .activity-job{padding:12px;margin:9px 0;border:1px solid #33415b;border-radius:12px;background:#111a2b;overflow-wrap:anywhere}
+.workspace-view .activity-job p{color:#c4d1e9;font-size:12px;margin:8px 0;line-height:1.45}
+.workspace-view .activity-job strong{font-size:13px}
+.workspace-view .activity-job button{margin-top:8px;min-height:36px}
+@media(max-width:680px){
+ .workspace-topbar{height:auto;min-height:calc(56px + env(safe-area-inset-top,0px));padding-top:env(safe-area-inset-top,0px);box-sizing:border-box}
+ .composer{padding-bottom:max(12px,env(safe-area-inset-bottom,0px))}
+ .workspace-view{padding-bottom:max(15px,env(safe-area-inset-bottom,0px))}
+ .chat .msg{overflow-wrap:anywhere;word-break:normal}
+}
+</style>
 </head>
 <body>
 <div class="workspace-rail" id="workspaceRail"><div class="rail-brand"><span class="rail-glyph">V</span><div><strong>V·ONE</strong><small>CODEX WORKSPACE</small></div></div><div class="rail-label">WORKSPACE</div><button class="rail-action selected" id="railChat">◈ &nbsp; Agente Master</button><button class="rail-action" id="railHistory">◷ &nbsp; Histórico</button><button class="rail-action" id="railActivity">Atividades</button><button class="rail-action" id="railTools">⌘ &nbsp; Ferramentas</button><div class="rail-label">EXECUÇÃO</div><div class="rail-info"><span class="rail-led"></span> Control Plane Cloud<br><small>Cloudflare · Zero Bill</small></div><div class="rail-bottom"><a href="/vone-access" style="color:#b9c6e5;text-decoration:none">Login / Cadastro</a> · <a href="/vone-admin" style="color:#b9c6e5;text-decoration:none">Administração</a> <span>R3</span></div></div>
@@ -376,28 +388,179 @@ function getQueue(){try{return JSON.parse(store.getItem('vone.queue')||'[]')}cat
 function saveQueue(q){store.setItem('vone.queue',JSON.stringify(q.slice(-20)))}
 function enqueuePrompt(p){const q=getQueue();q.push({id:crypto.randomUUID(),prompt:p,ts:Date.now()});saveQueue(q)}
 async function syncCloudHistory(){if(!state.ready)return;try{const r=await fetch('/api/mobile/history',{headers:auth(),cache:'no-store'});if(!r.ok)return;const j=await r.json();if(!j.ok||!Array.isArray(j.messages)||!j.messages.length)return;document.getElementById('chat').replaceChildren();for(const m of j.messages)addMsg(m.role==='user'?'me':'ai',m.content,'Cloudflare D1');}catch{}}
-async function pollHubJob(id){for(let i=0;i<50;i++){if(!state.ready)return;try{const r=await fetch('/api/mobile/hub/job?job_id='+encodeURIComponent(id),{headers:auth(),cache:'no-store'});const j=await r.json();if(r.ok&&j.status==='PASS'){const jobs=JSON.parse(store.getItem('vone.pending.jobs')||'[]');store.setItem('vone.pending.jobs',JSON.stringify(jobs.filter(x=>x!==id)));addMsg('ai',j.text,'V-ONE Hub · '+(j.model||'Worker'));setActivity('PASS','Resultado verificado');return}if(j.status==='FAIL'||(!r.ok&&r.status!==202)){addMsg('ai','Falha: '+(j.error||r.status),'FAIL');setActivity('FAIL',j.error||'Falha');return}setActivity('EXECUTANDO','Worker '+(j.worker_id||'aguardando')+' · '+(i+1)*3+'s')}catch{}await new Promise(r=>setTimeout(r,3000))}setActivity('HOLD','Execucao ainda pendente; tarefa salva em Atividades')}
-async function sendPromptToCloud(p){const r=await fetch('/api/mobile/chat',{method:'POST',headers:auth(),body:JSON.stringify({prompt:p,profile:'AUTO',max_tokens:900})});const j=await r.json().catch(()=>({}));return {r,j}}
-async function flushQueue(){if(state.flushing||!state.ready||!navigator.onLine)return;state.flushing=true;try{let q=getQueue();while(q.length&&navigator.onLine){const item=q[0];let out;try{out=await sendPromptToCloud(item.prompt)}catch{break}if(!out.r.ok||!out.j.ok)break;q.shift();saveQueue(q);addMsg('ai',out.j.text||'Concluído.',(out.j.profile||'AUTO')+' · '+(out.j.model||out.j.route||'V-ONE')+' · reenviado')}}finally{state.flushing=false}}
-async function who(){if(!state.secret)return false;const r=await fetch('/api/mobile/me',{headers:{authorization:'Bearer '+state.secret}});if(!r.ok)return false;const j=await r.json();state.ready=!!j.ok;if(state.ready)await syncCloudHistory();return state.ready}
+const activeHubPolls=new Set();
+function getPendingHubIds(){try{const ids=JSON.parse(store.getItem('vone.pending.jobs')||'[]');return Array.isArray(ids)?ids.filter(x=>typeof x==='string'&&x.length>20).slice(-30):[]}catch{return []}}
+function setPendingHubIds(ids){store.setItem('vone.pending.jobs',JSON.stringify([...new Set(ids)].slice(-30)))}
+async function getHubJob(id){const r=await fetch('/api/mobile/hub/job?job_id='+encodeURIComponent(id),{headers:auth(),cache:'no-store'});const j=await r.json().catch(()=>({}));return {r,j}}
+async function refreshHubJobs(){
+ if(!state.ready)return [];
+ let jobs=[];
+ try{
+   const r=await fetch('/api/mobile/hub/jobs',{headers:auth(),cache:'no-store'});
+   if(!r.ok)return [];
+   const j=await r.json();jobs=Array.isArray(j.jobs)?j.jobs:[];
+   for(const job of jobs.filter(x=>x.status==='done').slice(0,12)){try{await getHubJob(job.job_id)}catch{}}
+   const pending=jobs.filter(x=>x.status==='pending'||x.status==='claimed').map(x=>x.job_id);
+   setPendingHubIds(pending);
+   for(const id of pending.slice(0,4))pollHubJob(id);
+   for(const taskId of getPendingReviews())pollReviewTask(taskId);
+ }catch(e){setActivity('HOLD','Nao foi possivel consultar as atividades')}
+ return jobs;
+}
+async function pollHubJob(id){
+ if(!state.ready||activeHubPolls.has(id))return;
+ activeHubPolls.add(id);
+ try{
+   for(let i=0;i<80;i++){
+     if(!state.ready)return;
+     try{
+       const {r,j}=await getHubJob(id);
+       if(r.ok&&j.status==='PASS'){
+         setPendingHubIds(getPendingHubIds().filter(x=>x!==id));
+         setActivity('PASS','Resultado concluido e salvo no historico');
+         await syncCloudHistory();
+         return;
+       }
+       if(j.status==='FAIL'||(r.status>=400&&r.status!==429)){
+         setPendingHubIds(getPendingHubIds().filter(x=>x!==id));
+         setActivity('FAIL','Falha de execucao: '+(j.error||r.status));
+         addMsg('ai','Falha ao concluir a tarefa '+id+': '+(j.error||r.status),'FALHA');
+         return;
+       }
+       setActivity('EXECUTANDO','Worker '+(j.worker_id||'aguardando')+' - '+((i+1)*3)+'s');
+     }catch(e){setActivity('HOLD','Aguardando reconexao ao Master')}
+     await new Promise(resolve=>setTimeout(resolve,3000));
+   }
+   setActivity('HOLD','Tarefa em andamento. Retome em Atividades.');
+ }finally{activeHubPolls.delete(id)}
+}
+const activeReviewPolls=new Set();
+function getPendingReviews(){try{const ids=JSON.parse(store.getItem('vone.pending.reviews')||'[]');return Array.isArray(ids)?ids.filter(x=>typeof x==='string').slice(-20):[]}catch{return[]}}
+function setPendingReviews(ids){store.setItem('vone.pending.reviews',JSON.stringify([...new Set(ids)].slice(-20)))}
+async function pollReviewTask(taskId){
+ if(!state.ready||activeReviewPolls.has(taskId))return;
+ activeReviewPolls.add(taskId);
+ try{
+   for(let i=0;i<70;i++){
+     if(!state.ready)return;
+     try{
+       const r=await fetch('/api/mobile/execution/audit?task_id='+encodeURIComponent(taskId),{headers:auth(),cache:'no-store'});
+       const j=await r.json();const a=j.audit||{};
+       if(r.ok&&a.status==='PASS'){
+         setPendingReviews(getPendingReviews().filter(x=>x!==taskId));
+         setActivity('PASS','CODE_REVIEW validado: '+taskId);
+         await syncCloudHistory();return;
+       }
+       if(r.ok&&['FAIL','BLOCKED'].includes(a.status)){
+         setPendingReviews(getPendingReviews().filter(x=>x!==taskId));
+         setActivity('HOLD','CODE_REVIEW '+a.status+': '+(a.error_class||taskId));
+         return;
+       }
+       if(!r.ok&&r.status!==202){setActivity('HOLD',j.error||'Falha de auditoria');return}
+       setActivity('EXECUTANDO','CODE_REVIEW '+taskId+' - '+((i+1)*3)+'s');
+     }catch(e){setActivity('HOLD','Auditoria aguardando reconexao')}
+     await new Promise(resolve=>setTimeout(resolve,3000));
+   }
+   setActivity('HOLD','CODE_REVIEW pendente, retome em Atividades');
+ }finally{activeReviewPolls.delete(taskId)}
+}
+async function sendPromptToCloud(p,executionMode='AUTO'){const r=await fetch('/api/mobile/chat',{method:'POST',headers:auth(),body:JSON.stringify({prompt:p,profile:'AUTO',max_tokens:900,...(executionMode==='OWNED_CODE_REVIEW'?{execution_mode:executionMode}:{})})});const j=await r.json().catch(()=>({}));return {r,j}}
+async function flushQueue(){
+ if(state.flushing||!state.ready||!navigator.onLine)return;
+ state.flushing=true;
+ try{
+   let q=getQueue();
+   while(q.length&&navigator.onLine){
+     const item=q[0];let out;
+     try{out=await sendPromptToCloud(item.prompt)}catch{break}
+     if(out.j.error==='VONE_HUB_EXECUTION_PENDING'&&out.j.job_id){
+       setPendingHubIds([...getPendingHubIds(),out.j.job_id]);
+       q.shift();saveQueue(q);pollHubJob(out.j.job_id);continue;
+     }
+     if(!out.r.ok||!out.j.ok)break;
+     q.shift();saveQueue(q);
+     addMsg('ai',out.j.text||'Concluido.',(out.j.profile||'AUTO')+' - '+(out.j.model||out.j.route||'V-ONE')+' - reenviado');
+   }
+ }finally{state.flushing=false}
+}
+async function who(){if(!state.secret)return false;const r=await fetch('/api/mobile/me',{headers:{authorization:'Bearer '+state.secret}});if(!r.ok)return false;const j=await r.json();state.ready=!!j.ok;if(state.ready){await refreshHubJobs();await syncCloudHistory()}return state.ready}
 async function enroll(){makeIdentity();$('pairOverlay').classList.remove('hide');const account=await fetch('/api/accounts/me',{credentials:'same-origin',cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);if(!account?.user||account.user.status!=='APPROVED'){$('pairStatus').textContent='Entre com sua conta aprovada para usar este dispositivo. Se ja foi pareado, nao precisa de novo codigo.';return;}const secretHash=await hashHex(state.secret);const r=await fetch('/api/mobile/enroll/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({device_id:state.deviceId,secret_hash:secretHash,label:navigator.platform||'iPhone/iPad'})});const j=await r.json();if(!r.ok){$('pairStatus').textContent=j.error==='approved_account_login_required'?'Entre com uma conta aprovada antes de conectar este dispositivo. Use o link acima.':'Falha no pareamento: '+(j.error||r.status);return}if(j.status==='APPROVED'){state.ready=true;$('pairOverlay').classList.add('hide');return} $('pairCode').textContent=j.pairing_code||'------';pollPair()}
 async function pollPair(){for(let i=0;i<150&&!state.ready;i++){await new Promise(r=>setTimeout(r,2000));const r=await fetch('/api/mobile/enroll/status?device_id='+encodeURIComponent(state.deviceId));const j=await r.json().catch(()=>({}));if(j.status==='APPROVED'){state.ready=true;$('pairStatus').textContent='Aprovado';setTimeout(()=>$('pairOverlay').classList.add('hide'),500);return}if(j.status==='EXPIRED'){$('pairStatus').textContent='Pareamento expirado. Reabra o app.';return}}}
 async function refreshStatus(){try{const r=await fetch('/api/mobile/status',{cache:'no-store'});const j=await r.json();$('net').textContent=r.ok?'ONLINE':'HOLD';$('net').className='badge '+(r.ok?'ok':'');const m=j.mission||j.continuity?.mission||null;$('master').textContent=m?.status||j.service||'ONLINE';$('phase').textContent=m?.phase||j.architecture||'Cloudflare';const states=j.capacity?.states||j.capacity?.summary?.states||{};$('free').textContent=String((states.FREE_AVAILABLE||0)+(states.FREE_QUEUE||0));$('routes').textContent=(j.capacity?.routes||j.capacity?.summary?.routes||'—')+' rotas totais'}catch{$('net').textContent='OFFLINE';$('net').className='badge'}}
-async function send(){const p=$('prompt').value.trim();if(!p||!state.ready)return;$('prompt').value='';addMsg('me',p);if(p==='/status'||p==='/capacidade'||p==='/ferramentas'){try{const name=p==='/status'?'vone_status':p==='/capacidade'?'vone_capacity_plan':'vone_tool_catalog';const r=await fetch('/api/mobile/tool',{method:'POST',headers:auth(),body:JSON.stringify({name})});const j=await r.json();addMsg('ai',JSON.stringify(j,null,2),'Ferramenta '+name)}catch(e){addMsg('ai','Ferramenta indisponivel: '+String(e))}return;}if(!navigator.onLine){enqueuePrompt(p);addMsg('ai','Sem internet agora. Sua mensagem ficou salva neste iPhone e será enviada automaticamente quando a conexão voltar.','fila local');return}$('send').disabled=true;setActivity('EXECUTANDO','Despacho ao Master; aguardando recibo');addMsg('ai','Processando no V-ONE…','em execução');const pending=$('chat').lastElementChild;let out;try{out=await sendPromptToCloud(p)}catch{pending.remove();enqueuePrompt(p);addMsg('ai','Conexão caiu. Mensagem salva localmente para reenvio automático.','fila local');$('send').disabled=false;return}pending.remove();setActivity(out.r.ok&&out.j.ok?'PASS':'HOLD',out.j.task_id?'Tarefa '+out.j.task_id:(out.j.error||out.j.backend||out.j.route||''));if(out.j.error==='VONE_HUB_EXECUTION_PENDING'&&out.j.job_id){setActivity('EXECUTANDO','Worker recebeu a tarefa; acompanhando resultado');
+async function send(){const p=$('prompt').value.trim();if(!p||!state.ready)return;const executionMode=window.voneNextMode||'AUTO';window.voneNextMode='AUTO';$('prompt').value='';addMsg('me',p);if(p==='/status'||p==='/capacidade'||p==='/ferramentas'){try{const name=p==='/status'?'vone_status':p==='/capacidade'?'vone_capacity_plan':'vone_tool_catalog';const r=await fetch('/api/mobile/tool',{method:'POST',headers:auth(),body:JSON.stringify({name})});const j=await r.json();addMsg('ai',JSON.stringify(j,null,2),'Ferramenta '+name)}catch(e){addMsg('ai','Ferramenta indisponivel: '+String(e))}return;}if(!navigator.onLine&&executionMode==='OWNED_CODE_REVIEW'){addMsg('ai','HOLD: reconecte para autorizar CODE_REVIEW no executor verificado.','SEM CONEXAO');return}if(!navigator.onLine){enqueuePrompt(p);addMsg('ai','Sem internet agora. Sua mensagem ficou salva neste iPhone e será enviada automaticamente quando a conexão voltar.','fila local');return}$('send').disabled=true;setActivity('EXECUTANDO','Despacho ao Master; aguardando recibo');addMsg('ai','Processando no V-ONE…','em execução');const pending=$('chat').lastElementChild;let out;try{out=await sendPromptToCloud(p,executionMode)}catch{pending.remove();enqueuePrompt(p);addMsg('ai','Conexão caiu. Mensagem salva localmente para reenvio automático.','fila local');$('send').disabled=false;return}pending.remove();setActivity(out.r.ok&&out.j.ok?'PASS':'HOLD',out.j.task_id?'Tarefa '+out.j.task_id:(out.j.error||out.j.backend||out.j.route||''));if(out.j.error==='VONE_HUB_EXECUTION_PENDING'&&out.j.job_id){setActivity('EXECUTANDO','Worker recebeu a tarefa; acompanhando resultado');
  const id=out.j.job_id;
- const jobs=JSON.parse(store.getItem('vone.pending.jobs')||'[]');
- store.setItem('vone.pending.jobs',JSON.stringify([...new Set([...jobs,id])]));
- addMsg('ai','Solicitacao recebida pelo V-ONE. Consulte Atividades para acompanhar.','EXECUTANDO · '+id);
+ setPendingHubIds([...getPendingHubIds(),id]);
  $('send').disabled=false;pollHubJob(id);return;
+}
+if(out.j.status==='INCOMPLETE'&&out.j.task_id){
+ setPendingReviews([...getPendingReviews(),out.j.task_id]);setActivity('EXECUTANDO','CODE_REVIEW '+out.j.task_id);
+ pollReviewTask(out.j.task_id);$('send').disabled=false;return;
 }
 if(!out.r.ok||!out.j.ok){addMsg('ai','HOLD: '+(out.j.error||'Falha no V-ONE')+(out.j.task_id?'\\nTask: '+out.j.task_id:'')+(out.j.evidence?'\\nEvidencia: '+JSON.stringify(out.j.evidence,null,2):''));$('send').disabled=false;return}addMsg('ai',out.j.text||'Concluído.',(out.j.profile||'AUTO')+' · '+(out.j.model||out.j.route||'V-ONE'));$('send').disabled=false;$('prompt').focus()}
 $('send').addEventListener('click',send);$('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
 $('disconnect').addEventListener('click',async()=>{if(state.secret)await fetch('/api/mobile/disconnect',{method:'POST',headers:auth()}).catch(()=>{});store.removeItem('vone.secret');store.removeItem('vone.device');store.removeItem('vone.history');store.removeItem('vone.queue');location.reload()});
 window.addEventListener('online',()=>{refreshStatus();flushQueue()});window.addEventListener('offline',()=>{$('net').textContent='OFFLINE';$('net').className='badge'});
-(async()=>{refreshStatus();if('serviceWorker'in navigator)navigator.serviceWorker.register('/vone-mobile/sw.js').catch(()=>{});try{await loadAccountIdentity()}catch{$('pairOverlay').classList.remove('hide');$('pairStatus').textContent='Entre com sua conta aprovada antes de conectar este dispositivo.';return}loadHistory();makeIdentity();if(await who()){state.ready=true;flushQueue();for(const id of JSON.parse(store.getItem('vone.pending.jobs')||'[]'))pollHubJob(id)}else await enroll()})();
-window.addEventListener('focus',async()=>{if(!accountScope)return;try{const r=await fetch('/api/accounts/me',{credentials:'same-origin',cache:'no-store'});const j=await r.json();if(!r.ok||String(j.user?.id||'')!==accountScope){state.ready=false;location.reload()}}catch{}});
+(async()=>{refreshStatus();if('serviceWorker'in navigator)navigator.serviceWorker.register('/vone-mobile/sw.js').catch(()=>{});try{await loadAccountIdentity()}catch{$('pairOverlay').classList.remove('hide');$('pairStatus').textContent='Entre com sua conta aprovada antes de conectar este dispositivo.';return}loadHistory();makeIdentity();if(await who()){state.ready=true;flushQueue();refreshHubJobs()}else await enroll()})();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&state.ready)refreshHubJobs().then(()=>syncCloudHistory())});
+window.addEventListener('focus',async()=>{if(!accountScope)return;try{const r=await fetch('/api/accounts/me',{credentials:'same-origin',cache:'no-store'});const j=await r.json();if(!r.ok||String(j.user?.id||'')!==accountScope){state.ready=false;location.reload()}else if(state.ready){await refreshHubJobs();await syncCloudHistory()}}catch{}});
 // Workspace navigation is presentation-only; chat authentication and API remain unchanged.
-(function(){const rail=document.getElementById('workspaceRail'),content=document.getElementById('workspaceContent'),view=document.getElementById('workspaceView');const close=()=>rail.classList.remove('open');const select=(id)=>{document.querySelectorAll('.rail-action').forEach(x=>x.classList.toggle('selected',x.id===id));close()};document.getElementById('railToggle').addEventListener('click',()=>rail.classList.toggle('open'));document.getElementById('railChat').addEventListener('click',()=>{select('railChat');view.classList.remove('open');content.classList.remove('viewing')});document.getElementById('railHistory').addEventListener('click',()=>{select('railHistory');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();const h=document.createElement('h2');h.textContent='Histórico de execução';const p=document.createElement('p');p.textContent='Mensagens persistidas na Cloudflare D1 para este dispositivo autorizado. A sincronização entre contas e dispositivos distintos ainda não está habilitada.';const b=document.createElement('button');b.textContent='Voltar à conversa';b.onclick=()=>document.getElementById('railChat').click();view.append(h,p,b)});document.getElementById('railActivity').addEventListener('click',()=>{select('railActivity');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();const h=document.createElement('h2');h.textContent='Atividades';view.append(h);const jobs=JSON.parse(store.getItem('vone.pending.jobs')||'[]');if(!jobs.length){const p=document.createElement('p');p.textContent='Nenhuma tarefa pendente';view.append(p)}for(const id of jobs){const b=document.createElement('button');b.textContent='Retomar '+id.slice(0,12);b.onclick=()=>{document.getElementById('railChat').click();pollHubJob(id)};view.append(b)}});document.getElementById('railTools').addEventListener('click',()=>{select('railTools');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();const h=document.createElement('h2');h.textContent='Ferramentas do Master';const p=document.createElement('p');p.textContent='Consultas verificáveis com autorização do dispositivo. Nenhuma rota paga ou execução privilegiada é ativada por estes atalhos.';view.append(h,p);for(const [label,cmd] of [['Estado do Master','/status'],['Planejamento de capacidade','/capacidade']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>{document.getElementById('railChat').click();document.getElementById('prompt').value=cmd;document.getElementById('send').click()};view.appendChild(b)}const catalog=document.createElement('button');catalog.textContent='Consultar catalogo completo';catalog.onclick=async()=>{catalog.disabled=true;try{const r=await fetch('/api/mobile/tool',{method:'POST',headers:auth(),body:JSON.stringify({name:'vone_tool_catalog'})});const data=await r.json();if(!r.ok)throw Error(data.error||'HTTP '+r.status);const grid=document.createElement('div');grid.className='tool-list';for(const t of data.tools||[]){const item=document.createElement('article');item.className='tool-item';const name=document.createElement('strong');name.textContent=t.name;const description=document.createElement('p');description.textContent=t.description||t.mode||'';const status=document.createElement('span');status.className='tool-state'+(/HOLD|VERIFICATION/.test(t.state)?' hold':/DENIED/.test(t.state)?' denied':'');status.textContent=t.state+' / '+(t.permission||'');item.append(name,description,status);grid.append(item)}view.append(grid)}catch(e){const err=document.createElement('p');err.textContent='Catalogo indisponivel: '+e.message;view.append(err)}finally{catalog.disabled=false}};view.append(catalog)})})();
+(function(){const rail=document.getElementById('workspaceRail'),content=document.getElementById('workspaceContent'),view=document.getElementById('workspaceView');const close=()=>rail.classList.remove('open');const select=(id)=>{document.querySelectorAll('.rail-action').forEach(x=>x.classList.toggle('selected',x.id===id));close()};document.getElementById('railToggle').addEventListener('click',()=>rail.classList.toggle('open'));document.getElementById('railChat').addEventListener('click',()=>{select('railChat');view.classList.remove('open');content.classList.remove('viewing')});document.getElementById('railHistory').addEventListener('click',async()=>{
+ select('railHistory');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();
+ const h=document.createElement('h2');h.textContent='Historico de conversas';view.append(h);
+ const status=document.createElement('p');status.textContent='Consultando mensagens persistidas no Cloudflare D1...';view.append(status);
+ try {
+   const r=await fetch('/api/mobile/history',{headers:auth(),cache:'no-store'});
+   const data=await r.json();if(!r.ok)throw Error(data.error||'history_unavailable');
+   status.textContent='Historico deste dispositivo autorizado';
+   const messages=(data.messages||[]).slice(-30).reverse();
+   if(!messages.length)status.textContent='Ainda nao existem mensagens salvas.';
+   for(const m of messages){
+     const card=document.createElement('article');card.className='activity-job';
+     const label=document.createElement('strong');label.textContent=m.role==='user'?'Voce':'V-ONE';
+     const body=document.createElement('p');body.textContent=String(m.content||'').slice(0,480);
+     const time=document.createElement('small');time.textContent=m.created_at?new Date(m.created_at).toLocaleString('pt-BR'):'';
+     card.append(label,body,time);view.append(card);
+   }
+ }catch(e){status.textContent='Historico indisponivel: '+e.message}
+ const back=document.createElement('button');back.textContent='Voltar ao chat';back.onclick=()=>document.getElementById('railChat').click();view.append(back);
+});
+document.getElementById('railActivity').addEventListener('click',async()=>{
+ select('railActivity');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();
+ const h=document.createElement('h2');h.textContent='Atividades do V-ONE';view.append(h);
+ const p=document.createElement('p');p.textContent='Consultando jobs reais...';view.append(p);
+ try {
+   const jobs=await refreshHubJobs();
+   p.textContent=jobs.length?'Resultados, executores e estados verificados no Master.':'Nenhuma atividade registrada para este dispositivo.';
+   for(const job of jobs){
+     const box=document.createElement('article');box.className='activity-job';
+     const title=document.createElement('strong');title.textContent='Tarefa '+job.task_id;
+     const state=document.createElement('p');state.textContent='Estado: '+job.status.toUpperCase()+' | Worker: '+(job.worker_id||'aguardando');
+     const time=document.createElement('small');time.textContent=job.created_at?new Date(job.created_at).toLocaleString('pt-BR'):'';
+     const action=document.createElement('button');action.textContent=job.status==='done'?'Ver resultado':'Acompanhar';
+     action.onclick=async()=>{document.getElementById('railChat').click();
+       if(job.status==='done'){try{const {r,j}=await getHubJob(job.job_id);if(r.ok&&j.status==='PASS'){await syncCloudHistory();setActivity('PASS','Resultado recuperado do Master')}else setActivity('FAIL',j.error||'Resultado indisponivel')}catch(e){setActivity('HOLD','Sem conexao: '+e.message)}}
+       else pollHubJob(job.job_id);
+     };
+     box.append(title,state,time,action);view.append(box);
+   }
+ }catch(e){p.textContent='Falha ao consultar atividades: '+e.message}
+});
+document.getElementById('railTools').addEventListener('click',()=>{select('railTools');content.classList.add('viewing');view.classList.add('open');view.replaceChildren();const h=document.createElement('h2');h.textContent='Ferramentas do Master';const p=document.createElement('p');p.textContent='Consultas verificáveis com autorização do dispositivo. Nenhuma rota paga ou execução privilegiada é ativada por estes atalhos.';view.append(h,p);for(const [label,cmd] of [['Estado do Master','/status'],['Planejamento de capacidade','/capacidade']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>{document.getElementById('railChat').click();document.getElementById('prompt').value=cmd;document.getElementById('send').click()};view.appendChild(b)}const catalog=document.createElement('button');catalog.textContent='Consultar catalogo completo';catalog.onclick=async()=>{catalog.disabled=true;try{const r=await fetch('/api/mobile/tool',{method:'POST',headers:auth(),body:JSON.stringify({name:'vone_tool_catalog'})});const data=await r.json();if(!r.ok)throw Error(data.error||'HTTP '+r.status);const grid=document.createElement('div');grid.className='tool-list';for(const t of data.tools||[]){const item=document.createElement('article');item.className='tool-item';const name=document.createElement('strong');name.textContent=t.name;const description=document.createElement('p');description.textContent=t.description||t.mode||'';const status=document.createElement('span');status.className='tool-state'+(/HOLD|VERIFICATION/.test(t.state)?' hold':/DENIED/.test(t.state)?' denied':'');status.textContent=t.state+' / '+(t.permission||'');item.append(name,description,status);
+ if(t.name==='vone_executor_execute'&&t.state==='EXECUTOR_VERIFIED'){
+   const run=document.createElement('button');
+   run.textContent='Solicitar CODE_REVIEW';
+   run.onclick=()=>{
+     const objective=window.prompt('Qual revisao de codigo deseja executar no workspace autorizado?');
+     if(!objective||!objective.trim())return;
+     if(!window.confirm('Autorizar CODE_REVIEW real no Owned Executor? A execucao sera auditada e bloqueada se nao houver capacidade gratuita verificada.'))return;
+     window.voneNextMode='OWNED_CODE_REVIEW';
+     document.getElementById('railChat').click();
+     document.getElementById('prompt').value=objective.trim();
+     document.getElementById('send').click();
+   };
+   item.append(run);
+ }
+ grid.append(item)}view.append(grid)}catch(e){const err=document.createElement('p');err.textContent='Catalogo indisponivel: '+e.message;view.append(err)}finally{catalog.disabled=false}};view.append(catalog)})})();
 </script>
 </body>
 </html>`;
