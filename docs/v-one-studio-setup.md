@@ -62,13 +62,14 @@ explícito, porque é um escopo bem diferente do resto deste doc.
 
 ## 4. Worker local como motor padrão
 
-Estado real deste checkout (ver `AGENTS.md`, seção "Duas linhas de
-desenvolvimento"): esta branch (`claude/v-one-yellow-ap1-juxog9`, linha
-"núcleo") tem o model router e os gates, mas **não tem** o runtime do
-worker de desktop. O runtime real (`vone_owned_worker_main.ts`) está na
-linha `chatgpt/*` - confirmado 2026-10-08, 14/14 suítes passando,
-`tsc --noEmit` limpo nessa linha e na correção de checkpoint (PR #12,
-já mergeada nela).
+**Atualizado 2026-10-10: as linhas `chatgpt/*` e "núcleo" foram
+unificadas** (ver `AGENTS.md`, "Linhas de desenvolvimento unificadas em
+2026-10-10") - o runtime do worker (`vone_owned_worker_main.ts`) está
+direto nesta branch/main agora, com bem mais evoluções desde então
+(worker local de chat sem D1, fix testado de pareamento de dispositivo,
+etc.). **Não faça checkout de `chatgpt/local-model-protocol-adapter-r1`
+nem `chatgpt/worker-identity-r1`** - são branches antigas, você perderia
+tudo isso.
 
 **Pelo script** - `scripts/start-local-worker.ps1` (Windows/PowerShell) ou
 `scripts/start-local-worker.sh` (Linux/macOS) - falha fechado em cada
@@ -76,14 +77,14 @@ pré-condição em vez de tentar "dar um jeito" - nunca pede nem imprime o
 valor do token, só compara hash:
 
 ```powershell
-git checkout chatgpt/local-model-protocol-adapter-r1
+git pull
 npm ci
 $env:VONE_WORKER_TOKEN = (Get-Content <caminho do seu worker.token local> -Raw).Trim()
 scripts\start-local-worker.ps1
 ```
 
 ```bash
-git checkout chatgpt/local-model-protocol-adapter-r1
+git pull
 npm ci
 export VONE_WORKER_TOKEN="$(cat <caminho do seu worker.token local> | tr -d '[:space:]')"
 scripts/start-local-worker.sh
@@ -109,10 +110,11 @@ impresso). **O que não testei:** o processo final subindo de verdade com
 Ollama + token reais, nem a versão `.ps1` (não tenho PowerShell aqui) - rode
 no seu desktop e me diga o que aconteceu, inclusive se algum passo falhar.
 
-Passo a passo equivalente, manual, se preferir não usar o script:
+Passo a passo equivalente, manual, se preferir não usar o script (na
+branch/main atual, sem trocar de branch):
 
 ```bash
-git checkout chatgpt/local-model-protocol-adapter-r1   # ou claude/vone-session-checkpoint-fix-r1 (já mergeada na linha acima)
+git pull
 npm ci
 ollama list   # confirme que v-one-coder:fast aparece - medido: 15,88 tok/s geração / 59,3 tok/s prompt eval
               # nesse hardware (i7-8650U, CPU-only) - ver src/core/vone_hardware_sizing.ts
@@ -120,6 +122,12 @@ $env:VONE_WORKER_TOKEN = "..."   # token real - AGENTS.md: não existe emissão 
                                   # nunca cole o valor no chat, compare hash se precisar verificar
 npx ts-node src/server/vone_owned_worker_main.ts
 ```
+
+Ao subir, o worker agora também imprime um bloco `local_chat_server`
+(host, porta e `auth_token`) - copia esses três valores pra
+`VITE_VONE_LOCAL_URL`/`VITE_VONE_LOCAL_TOKEN` em `apps/vone-studio/.env.local`
+(ver `apps/vone-studio/README.md`) pra ligar o V-ONE Studio nesse worker,
+sem precisar de Master na nuvem nem de D1.
 
 Dentro do V-ONE Studio, esse worker é o motor padrão: é ele que fica de pé
 o tempo todo, sem hora, sem crédito contado, porque é computação sua, local.
