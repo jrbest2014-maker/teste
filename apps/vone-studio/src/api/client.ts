@@ -177,3 +177,83 @@ export class HttpVOneApiClient implements VOneApiClient {
     };
   }
 }
+
+export interface LocalClientConfig {
+  /** http://127.0.0.1:8787 - o VOneLocalChatServer (src/server/vone_local_chat_server.ts), rodando na mesma máquina. */
+  readonly localUrl: string;
+  /** Token impresso no log de boot do worker próprio ao subir (não é credencial Cloudflare). */
+  readonly authToken: string;
+}
+
+interface LocalChatResponse {
+  status: 'DONE' | 'HOLD';
+  target: 'CLOUD_FREE' | 'DESKTOP_LOCAL' | 'HOLD';
+  reason: string;
+  text?: string;
+  model?: string;
+}
+
+/**
+ * Cliente contra o VOneLocalChatServer - fala direto com
+ * VOneInferenceFailoverExecutor em processo, sem passar pela fila de jobs
+ * do Master (Cloudflare D1). Existe especificamente pra não depender do
+ * Master ficar saudável: enquanto o worker próprio (e, se configurado,
+ * Ollama local) estiverem de pé nesta máquina, o chat continua
+ * respondendo mesmo com o Master em HOLD/OFFLINE por cota de D1 excedida -
+ * o que já aconteceu de verdade (ver README).
+ *
+ * Contrato 100% confirmado: o servidor e este cliente foram escritos e
+ * testados juntos nesta sessão (vone_local_chat_server.test.ts), não é
+ * inferência sobre código de terceiro.
+ */
+export class LocalVOneApiClient implements VOneApiClient {
+  private readonly localUrl: string;
+  private readonly authToken: string;
+
+  constructor(config: LocalClientConfig) {
+    this.localUrl = config.localUrl.replace(/\/$/, '');
+    this.authToken = config.authToken;
+  }
+
+  async listWorkspaces(): Promise<Workspace[]> {
+    // O servidor local hoje só expõe /chat - não lista pasta/arquivo.
+    return [];
+  }
+
+  async listSessions(): Promise<Session[]> {
+    // Servidor local é deliberadamente sem estado (sem D1, sem banco
+    // nenhum) - cada boot começa uma conversa nova. Uma sessão vazia é o
+    // estado real, não um erro.
+    return [{ id: 'local-session', title: 'Conversa local (sem nuvem)', updatedAt: new Date().toISOString(), messages: [] }];
+  }
+
+  async getGateStatus(): Promise<GateStatus> {
+    const response = await fetch(`${this.localUrl}/health`);
+    if (!response.ok) {
+      throw new Error(`[LOCAL] GET /health -> HTTP ${response.status}`);
+    }
+    return { paidBlocked: 'INVIOLABLE', unknownCost: 'HOLD', physicalOutput: 'LOCKED' };
+  }
+
+  async sendMessage(_sessionId: string, text: string): Promise<ChatMessage> {
+    const response = await fetch(`${this.localUrl}/chat`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        authorization: `Bearer ${this.authToken}`,
+      },
+      body: JSON.stringify({ prompt: text }),
+    });
+    const body = (await response.json()) as LocalChatResponse;
+    if (!response.ok || body.status !== 'DONE') {
+      throw new Error(`[LOCAL] ${body.reason ?? `HTTP ${response.status}`}`);
+    }
+    return {
+      id: `local-${Date.now()}`,
+      role: 'assistant',
+      text: body.text ?? '(resposta vazia do worker local)',
+      createdAt: new Date().toISOString(),
+    };
+  }
+}

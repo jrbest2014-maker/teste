@@ -13,6 +13,7 @@ import { VOneInferenceFailoverExecutor } from './vone_inference_failover_executo
 import { BudgetedInferenceRouter } from './vone_budgeted_inference_router';
 import { NeuronBudgetManager } from './vone_neuron_budget';
 import { CloudflareInferenceBackend, OllamaInferenceBackend } from './vone_inference_backends';
+import { VOneLocalChatServer } from './vone_local_chat_server';
 import {
     assertVerifiedCapacitySnapshot,
     modelRouteFromCapacitySnapshot,
@@ -70,6 +71,26 @@ async function main(): Promise<void> {
     const localBackend = new OllamaInferenceBackend('http://127.0.0.1:11434', model);
     const inferenceExecutor = new VOneInferenceFailoverExecutor(budgetRouter, cloudBackend, localBackend);
 
+    // Servidor local (loopback-only) que fala direto com inferenceExecutor,
+    // sem passar pela fila de jobs do Master (Cloudflare D1). Existe porque
+    // o /vone-mobile real só sabe chamar a rota CLOUD_ONLY do Master: com o
+    // D1 travado (cota de escrita do tier grátis excedida - confirmado ao
+    // vivo em 2026-10-10), o app inteiro cai OFFLINE mesmo com Ollama local
+    // saudável, porque até despachar um job local passa pelo D1. Isso dá
+    // pro apps/vone-studio (e qualquer cliente na mesma máquina) um
+    // caminho que continua de pé independente do estado do Master na
+    // nuvem. Falha ao subir (porta ocupada etc.) só loga - não derruba o
+    // loop principal, que é o que de fato atende jobs do Master.
+    const localChatPort = positiveIntFromEnv('VONE_LOCAL_CHAT_PORT', 8787);
+    const localChatServer = new VOneLocalChatServer(inferenceExecutor, { port: localChatPort });
+    let localChatStarted = false;
+    try {
+        await localChatServer.start();
+        localChatStarted = true;
+    } catch (error) {
+        console.error('LOCAL_CHAT_SERVER_START_ERROR', error instanceof Error ? error.message : String(error));
+    }
+
     const worker = new VOneDualWorker({
         workerId,
         master,
@@ -124,6 +145,14 @@ async function main(): Promise<void> {
         gates,
         heartbeatIntervalMs,
         pollIntervalMs,
+        local_chat_server: localChatStarted
+            ? {
+                  started: true,
+                  ...localChatServer.getAddress(),
+                  auth_token: localChatServer.getAuthToken(),
+                  note: 'Não é credencial Cloudflare - token local gerado agora, só vale enquanto este processo roda. Copie pra VITE_VONE_LOCAL_TOKEN em apps/vone-studio/.env.local.',
+              }
+            : { started: false },
     }));
 
     while (true) {

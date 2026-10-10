@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { HttpVOneApiClient, MockVOneApiClient, type VOneApiClient } from './api/client';
+import { HttpVOneApiClient, LocalVOneApiClient, MockVOneApiClient, type VOneApiClient } from './api/client';
 import { getOrCreateDeviceId } from './api/deviceId';
 import type { ChatMessage, GateStatus, Session, Workspace } from './types/vone';
 import { Sidebar } from './components/Sidebar';
@@ -8,16 +8,22 @@ import { ChatPanel } from './components/ChatPanel';
 import { CodespacePanel } from './components/CodespacePanel';
 import './App.css';
 
+const localUrl = import.meta.env.VITE_VONE_LOCAL_URL as string | undefined;
+const localToken = import.meta.env.VITE_VONE_LOCAL_TOKEN as string | undefined;
 const masterUrl = import.meta.env.VITE_VONE_MASTER_URL as string | undefined;
 const cloudWorkerUrl = import.meta.env.VITE_VONE_CLOUD_WORKER_URL as string | undefined;
-const usingLiveBackend = Boolean(masterUrl || cloudWorkerUrl);
 
-// Sem nenhuma VITE_VONE_* configurada, fica no mock (navegável, sem rede).
-// Com qualquer uma configurada, fala com o backend real - ver
-// src/api/client.ts pro que está confirmado vs. inferido em cada chamada.
-const api: VOneApiClient = usingLiveBackend
-  ? new HttpVOneApiClient({ masterUrl, cloudWorkerUrl, deviceId: getOrCreateDeviceId() })
-  : new MockVOneApiClient();
+// Prioridade: local (worker próprio nesta máquina, não depende do Master
+// na nuvem nem do D1 dele) > Master na nuvem > mock. O local existe
+// justamente pra continuar funcionando quando o Master cai (já aconteceu
+// de verdade: cota de escrita do D1 excedida) - ver src/api/client.ts e
+// src/server/vone_local_chat_server.ts.
+const api: VOneApiClient =
+  localUrl && localToken
+    ? new LocalVOneApiClient({ localUrl, authToken: localToken })
+    : masterUrl || cloudWorkerUrl
+      ? new HttpVOneApiClient({ masterUrl, cloudWorkerUrl, deviceId: getOrCreateDeviceId() })
+      : new MockVOneApiClient();
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);

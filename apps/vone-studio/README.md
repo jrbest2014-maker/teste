@@ -64,9 +64,39 @@ de release de verdade.
 
 ## Ligando no backend real
 
-`src/api/client.ts` tem `HttpVOneApiClient` implementado (não é mais
-stub). Pra ativar: copie `.env.example` pra `.env.local`, preencha as URLs,
-rode `npm run dev`. Sem nenhuma das duas variáveis, fica no mock.
+Duas opções, nessa ordem de prioridade em `App.tsx` (local vence se as
+duas estiverem configuradas):
+
+### Opção 1 (recomendada): worker local, sem depender da nuvem
+
+`LocalVOneApiClient` fala direto com `VOneLocalChatServer`
+(`src/server/vone_local_chat_server.ts`), que roda junto com o worker
+próprio (`vone_owned_worker_main.ts`) na máquina do dono e chama
+`VOneInferenceFailoverExecutor` **em processo**, sem passar pela fila de
+jobs do Master (Cloudflare D1).
+
+Existe porque, na prática, o Master caiu (ver bloqueios reais na Opção 2
+abaixo) e o
+app mobile oficial (`/vone-mobile`, fora deste repositório) só sabe falar
+com a rota `CLOUD_ONLY` do Master - sem esse Master de pé, cai inteiro pra
+`OFFLINE`, mesmo com Ollama local saudável. Esse caminho local não tem
+esse problema: fica de pé enquanto o processo do worker próprio estiver
+rodando, Master saudável ou não.
+
+Pra ativar: suba o worker (`ts-node src/server/vone_owned_worker_main.ts`
+na raiz do repo, com `VONE_WORKER_TOKEN` configurado), copie
+`host`/`port`/`auth_token` do bloco `local_chat_server` que ele imprime ao
+subir pra `VITE_VONE_LOCAL_URL`/`VITE_VONE_LOCAL_TOKEN` em `.env.local`
+deste app, rode `npm run dev`. Contrato 100% confirmado - servidor e
+cliente escritos e testados juntos nesta sessão
+(`vone_local_chat_server.test.ts`), testado de ponta a ponta com
+Playwright contra servidor real + browser real (mensagem enviada,
+resposta renderizada, zero erro de console, zero banner de erro).
+
+### Opção 2: Master na nuvem
+
+`HttpVOneApiClient` implementado (não é mais stub). Pra ativar: preencha
+`VITE_VONE_MASTER_URL`/`VITE_VONE_CLOUD_WORKER_URL` em `.env.local`.
 
 Estado real de cada método, por confiança:
 
