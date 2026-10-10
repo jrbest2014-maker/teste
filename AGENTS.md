@@ -303,3 +303,100 @@ resgatado: `cloudflare-control-plane/*` (snapshot do código do Master que
 contradiz a política acima de "Master não versionado", importa 2 arquivos
 que não existem no branch, e está desatualizado frente à versão
 `2.4.7-worker-identity-r1-compat` que já roda em produção).
+
+## Bug real encontrado em 2026-10-10 (conserto pronto, não aplicado - falta acesso ao Master ao vivo): código de pareamento regenerado a cada reconexão, trava aprovação
+
+Usuário relatou sintoma real: no painel `/vone-admin`, fica pedindo
+re-autenticação repetidamente mesmo com o dispositivo já tendo
+autenticado antes, e às vezes trava na tela de código de verificação sem
+ir pra frente nem pra trás.
+
+**Achado, com evidência em código, não suposição:** o snapshot do Master
+em `cloudflare-control-plane/*` (branch `origin/chatgpt/worker-identity-r1`,
+não mergeado - ver nota acima sobre por que não foi resgatado) reporta a
+mesma string de versão (`2.4.7-worker-identity-r1-compat`) que já está
+confirmada rodando em produção hoje, o que sugere parentesco real com o
+código ao vivo, mesmo o snapshot sendo incompleto/desatualizado em outros
+pontos. Lendo `cloudflare-control-plane/src/mobile-pwa.mjs` função por
+função:
+
+`startMobileEnrollment()` (linha 67) só reaproveita o estado existente
+quando o dispositivo já está `APPROVED` (linha 85-92). Pra qualquer outro
+caso - inclusive um dispositivo que já está `PENDING` com o **mesmo**
+`secret_hash`, só esperando aprovação - ela cai no `INSERT ... ON
+CONFLICT(device_id) DO UPDATE SET ... pairing_code=excluded.pairing_code`
+(linha 96-115), que **sempre** gera um código de 6 dígitos novo
+(`sixDigitCode()`, linha 94) e sobrescreve o anterior.
+
+No cliente, `enroll()` (linha 487) é chamado toda vez que `who()` falha
+no boot (linha 503) - e o boot roda de novo sempre que o PWA é
+relançado (iOS evicta app em background com frequência) ou que o listener
+de `focus` (linha 505) detecta mismatch de conta e faz
+`location.reload()`. Cada relançamento chama `/api/mobile/enroll/start`
+de novo pro mesmo dispositivo ainda `PENDING` - gerando um código novo e
+invalidando o que o administrador estava vendo na tela de aprovação
+(`mobile-admin.mjs`), que compara `typed.trim()!==d.pairing_code` contra
+o código antigo e falha com "Código não confere". Isso explica
+diretamente os dois sintomas relatados: pede de novo mesmo "já
+autenticado" (o dispositivo nunca chegou a ser aprovado porque o código
+muda debaixo do pé) e trava sem avançar (todo "aprovar" com o código
+antigo falha).
+
+**Conserto (não aplicado - precisa ser colado no equivalente real dentro
+do Worker `vone-control-plane` via Cloudflare Quick Edit, depois de
+localizar a função lá e confirmar que a lógica bate com este snapshot):**
+
+Substituir o bloco entre a checagem de `APPROVED` (linha 85-92) e a
+geração do código (linha 94) por uma checagem adicional que reaproveita o
+código existente quando o dispositivo já está `PENDING` com o mesmo
+segredo e ainda dentro da janela de expiração:
+
+```js
+if (
+  existing &&
+  existing.secret_hash === secretHash &&
+  existing.status === 'APPROVED' &&
+  Number(existing.access_expires_at || 0) > now
+) {
+  return json({ ok: true, status: 'APPROVED', device_id: deviceId });
+}
+
+// NOVO: mesmo dispositivo, mesmo segredo, ainda pendente e dentro da
+// janela - devolve o código já emitido em vez de gerar outro e invalidar
+// o que o admin está vendo.
+if (
+  existing &&
+  existing.secret_hash === secretHash &&
+  existing.status === 'PENDING' &&
+  Number(existing.enroll_expires_at || 0) > now
+) {
+  return json({
+    ok: true,
+    status: 'PENDING',
+    device_id: deviceId,
+    pairing_code: existing.pairing_code,
+    expires_at: existing.enroll_expires_at,
+  });
+}
+
+const pairingCode = sixDigitCode();
+// ... resto igual (INSERT/ON CONFLICT só roda quando é dispositivo
+// genuinamente novo, segredo mudou, ou o pareamento anterior expirou)
+```
+
+A query de `SELECT` que busca `existing` (linha 77-79) precisa passar a
+trazer `pairing_code,enroll_expires_at` também (hoje só traz
+`device_id,secret_hash,status,access_expires_at,user_id`).
+
+**Por que não apliquei direto:** esse código não está neste repositório -
+só existe no Worker ao vivo, editável via Cloudflare Quick Edit, sem
+acesso nesta sessão (ver pendência de `CLOUDFLARE_API_TOKEN`/
+`CLOUDFLARE_ACCOUNT_ID` em configuração). Aplicar um patch às cegas, sem
+ler a função real primeiro, arrisca piorar algo que hoje funciona.
+**Não é o segundo achado (perda de `device_id` no cliente quando o
+`localStorage` é evictado pelo iOS) que também contribui pro sintoma** -
+esse é mais estrutural (limite de armazenamento do Safari, não um bug de
+lógica simples) e precisa de decisão de produto (ex.: permitir conta
+`OWNER`/já aprovada pular aprovação manual pra um dispositivo novo, com
+outro tipo de verificação) antes de qualquer código - não implementado,
+nem desenhado em detalhe.
