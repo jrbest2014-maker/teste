@@ -2454,7 +2454,7 @@ async function handleMobileChat(request, env) {
   if(hubWorker.online && (hubWorker.worker?.status?.execution_contracts||[]).includes('VONE_HUB_CHAT_R1') && hubWorker.worker?.status?.ollama_health==='ONLINE'){
     const taskId='hub_'+crypto.randomUUID();
     try {
-      const result=await queueTool(env,'vone_hub_chat',{protocol:'VONE_HUB_CHAT_R1',task_id:taskId,prompt,max_tokens:maxTokens},{preserveOnTimeout:true,timeoutMs:26000});
+      const result=await queueTool(env,'vone_hub_chat',{protocol:'VONE_HUB_CHAT_R1',task_id:taskId,device_id:device.device_id,prompt,max_tokens:maxTokens},{preserveOnTimeout:true,timeoutMs:26000});
       if(result?.protocol==='VONE_HUB_CHAT_R1' && result.status==='DONE' && result.task_id===taskId && typeof result.text==='string' && result.text.trim()){
         await saveMobileMessage(env,device.device_id,'assistant',result.text);
         return reply({ok:true,text:result.text,backend:'vone-unified-hub-agent',route:'VONE_OWNED_HUB',model:result.model||null,worker_id:result.worker_id||null,task_id:taskId,execution_verified:true});
@@ -2524,6 +2524,24 @@ export default {
     if (method === 'GET' && url.pathname === '/api/mobile/enroll/status') return mobileEnrollmentStatus(request, env);
     if (method === 'GET' && url.pathname === '/api/mobile/me') return mobileWhoAmI(request, env);
     if (method === 'POST' && url.pathname === '/api/mobile/disconnect') return mobileDisconnect(request, env);
+    if (method === 'GET' && url.pathname === '/api/mobile/hub/job') {
+      const device=await mobileAuthorized(request,env);
+      if(!device)return reply({ok:false,error:'mobile_auth_required'},401);
+      const jobId=String(url.searchParams.get('job_id')||'').slice(0,128);
+      if(!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(jobId))return reply({ok:false,error:'invalid_job_id'},400);
+      const row=await env.DB.prepare('SELECT id,status,tool_name,args,worker_id,result,error FROM jobs WHERE id=?').bind(jobId).first();
+      if(!row||row.tool_name!=='vone_hub_chat')return reply({ok:false,error:'job_not_found'},404);
+      let args={};try{args=JSON.parse(row.args||'{}')}catch{}
+      if(args.device_id!==device.device_id)return reply({ok:false,error:'job_access_denied'},403);
+      const state=String(row.status||'pending');
+      if(state==='done'){
+        let result={};try{result=JSON.parse(row.result||'{}')}catch{}
+        if(result.protocol!=='VONE_HUB_CHAT_R1'||result.status!=='DONE'||result.task_id!==args.task_id||typeof result.text!=='string'||!result.text.trim())return reply({ok:false,status:'FAIL',error:'invalid_hub_result'},409);
+        return reply({ok:true,status:'PASS',text:result.text,model:result.model||null,worker_id:row.worker_id||null,task_id:args.task_id});
+      }
+      if(state==='error')return reply({ok:false,status:'FAIL',error:String(row.error||'worker_error').slice(0,200)},409);
+      return reply({ok:false,status:'EXECUTANDO',job_id:jobId,worker_id:row.worker_id||null},202);
+    }
     if (method === 'POST' && url.pathname === '/api/mobile/chat') return handleMobileChat(request, env);
     if (method === 'GET' && url.pathname === '/api/mobile/history') return handleMobileHistory(request, env);
     if (method === 'POST' && url.pathname === '/api/mobile/tool') return handleMobileTool(request, env);
