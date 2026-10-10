@@ -1,0 +1,72 @@
+{
+  // === Ambiente de desenvolvimento determinístico ===
+  // Objetivo: o IDE não reescreve, reformata nem refatora código por conta
+  // própria. Toda mudança é explícita, revisável e reproduzível.
+  //
+  // IMPORTANTE: configuração de IDE é consultiva (reduz alteração acidental),
+  // NÃO é um controle de segurança. A garantia real vem do selo de hashes
+  // (scripts/seal-validated.sh + hook pre-commit) e da proteção de branch.
+
+  // --- Sem reescrita automática ao salvar/colar/digitar ---
+  "editor.formatOnSave": false,
+  "editor.formatOnPaste": false,
+  "editor.formatOnType": false,
+  "editor.codeActionsOnSave": {},
+  "editor.linkedEditing": false,
+  "files.trimTrailingWhitespace": false,
+  "files.insertFinalNewline": false,
+  "files.trimFinalNewlines": false,
+  "files.autoSave": "off",
+  "typescript.updateImportsOnFileMove.enabled": "never",
+  "javascript.updateImportsOnFileMove.enabled": "never",
+
+  // --- Copilot/Codex ativos de propósito (uso com GPT/Codex e Claude lado
+  // a lado neste repositório) - a disciplina aqui é não deixar a sugestão
+  // virar código sem revisão (readonlyInclude abaixo + selo de hashes),
+  // não impedir o agente de sugerir.
+  "editor.inlineSuggest.enabled": true,
+  "editor.acceptSuggestionOnEnter": "off",
+  "github.copilot.enable": { "*": true },
+
+  // --- Trechos já validados ficam somente leitura no editor ---
+  // Edição exige remover o caminho daqui conscientemente e revalidar.
+  "files.readonlyInclude": {
+    "src/core/**": true,
+    "src/server/vone_executor.ts": true,
+    "src/server/vone_model_router.ts": true
+  },
+  "files.readonlyFromPermissions": true,
+
+  // --- Sem execução / atualização implícita ---
+  "security.workspace.trust.enabled": true,
+  "task.allowAutomaticTasks": "off",
+  "npm.autoDetect": "off",
+  "git.autofetch": false,
+  "extensions.autoUpdate": false,
+  "extensions.autoCheckUpdates": false,
+  "update.mode": "manual",
+  "telemetry.telemetryLevel": "off",
+
+  // --- V-ONE Studio: rebranding visual deste workspace ---
+  // Efeito imediato, sem precisar instalar nada: colorCustomizations é lido
+  // direto do settings.json. O tema completo instalável (editor/vone-studio-theme)
+  // é opcional - ver docs/v-one-studio-setup.md. Isto NÃO altera nenhum gate,
+  // limite ou autenticação de ferramenta nenhuma (Codex/Copilot continuam com
+  // seus próprios limites reais, intocados).
+  "window.title": "V-ONE Studio — ${activeEditorShort}${separator}${rootName}",
+  "workbench.colorTheme": "V-ONE Studio",
+  "workbench.colorCustomizations": {
+    "focusBorder": "#F2B134",
+    "activityBar.background": "#0E0E0E",
+    "activityBarBadge.background": "#F2B134",
+    "activityBarBadge.foreground": "#121212",
+    "statusBar.background": "#0E0E0E",
+    "statusBar.debuggingBackground": "#F2B134",
+    "statusBar.debuggingForeground": "#121212",
+    "titleBar.activeBackground": "#0E0E0E",
+    "titleBar.activeForeground": "#E8E6E3",
+    "tab.activeBorderTop": "#F2B134",
+    "button.background": "#F2B134",
+    "button.foreground": "#121212"
+  }
+}

@@ -1,0 +1,118 @@
+name: V-ONE Cloudflare Direct
+
+on:
+  push:
+    branches:
+      - chatgpt/cloudflare-direct-r1
+    paths:
+      - ".github/workflows/vone-cloudflare-direct.yml"
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Validate or deploy"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - deploy
+      source_ref:
+        description: "Canonical V-ONE source"
+        required: true
+        default: chatgpt/worker-identity-r1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vone-cloudflare-direct
+  cancel-in-progress: false
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout canonical V-ONE source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || 'chatgpt/worker-identity-r1' }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify Cloudflare credentials exist
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo "::error::CLOUDFLARE_API_TOKEN missing"
+            exit 78
+          }
+
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || {
+            echo "::error::CLOUDFLARE_ACCOUNT_ID missing"
+            exit 78
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test V-ONE safety gates
+        run: npm test
+
+      - name: Wrangler dry-run
+        run: npm run cf:dry-run
+
+      - name: Deploy Cloudflare Worker
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' }}
+        run: npm run cf:deploy
+
+      - name: Verify Worker health
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          node <<'NODE'
+          const url =
+            "https://v-one-cloud-inference-r1.vone-technology.workers.dev/health";
+
+          const response = await fetch(url);
+
+          if (!response.ok) {
+            throw new Error("health_http_" + response.status);
+          }
+
+          const body = await response.json();
+
+          console.log(JSON.stringify({
+            service: body?.service,
+            status: body?.status,
+            inference_policy: body?.inference_policy,
+            paid_blocked: body?.paid_blocked,
+            physical_output: body?.physical_output,
+            model: body?.model
+          }));
+
+          const valid =
+            body?.service === "V-ONE Cloud Inference R1" &&
+            body?.status === "READY" &&
+            body?.inference_policy === "VERIFIED_FREE_ONLY" &&
+            body?.paid_blocked === "INVIOLABLE" &&
+            body?.physical_output === "LOCKED";
+
+          if (!valid) {
+            throw new Error("health_contract_invalid");
+          }
+          NODE
