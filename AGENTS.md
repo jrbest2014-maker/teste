@@ -245,20 +245,32 @@ falha nem vaza pra nuvem - é o comportamento correto sob
 `PAID_BLOCKED=INVIOLABLE` (não dá pra "resolver" disponibilidade botando
 servidor pago sempre ligado), não um bug.
 
-**Causa raiz separada, real, do `CAPABILITY_MISMATCH` na rota
-`client-desktop-vone-primary`:** o worker ao vivo está rodando em
-`auth_mode=LEGACY_COMPAT` (`identity_generation=null`), com `capabilities`
-no formato antigo (nomes de ferramenta: `ask_yellow`, `yellow_route_preview`,
-`yellow_status`) em vez do formato novo `task_classes` (`LLM_FAST` etc.)
-que `vone_capacity_plan`/`VONE_CAPACITY_SNAPSHOT_R1` exige. Não é falta de
-código - `vone_worker_identity.ts` e o fluxo de identidade em
-`vone_owned_worker_main.ts` já estão em `main`, mais evoluídos que nos
-branches `chatgpt/worker-identity-r1`/`chatgpt/local-model-protocol-adapter-r1`
-(comparação real feita nesta sessão, PR #15 fechada sem merge por isso - ver
-abaixo). É operacional: o processo do worker rodando no desktop precisa ser
-reiniciado a partir de um checkout atualizado de `main` (`scripts/
-start-local-worker.ps1`/`.sh`, corrigidos nesta sessão pra apontar pra
-`main` em vez do branch antigo) pra re-registrar com o schema novo.
+**Causa raiz do `CAPABILITY_MISMATCH` na rota `client-desktop-vone-primary`
+- CORRIGIDO EM 2026-10-10, a nota anterior (mesmo dia) estava errada.** A
+nota anterior dizia que bastava reiniciar o worker a partir de um checkout
+atualizado de `main` pra "re-registrar com o schema novo". **Testado ao
+vivo: reiniciar não resolve.** Rodou `scripts/start-local-worker.ps1` a
+partir de um checkout fresco de `main`, revalidado logo depois com
+`vone_capacity_plan`/`yellow_status` reais - `CAPABILITY_MISMATCH` e
+`auth_mode=LEGACY_COMPAT` continuaram idênticos a antes.
+
+Causa raiz real, confirmada lendo código: `vone_dual_worker.ts:38` manda no
+heartbeat `capabilities:['vone_executor_execute','vone_inference_execute']`
+- mas o `yellow_status` ao vivo reporta de volta
+`capabilities:['ask_yellow','yellow_route_preview','yellow_status']`,
+**um valor completamente diferente do que o worker de fato envia.** Isso só
+é possível se o Master substituir o `capabilities` reportado por um valor
+próprio e fixo para workers autenticados via `auth_mode=LEGACY_COMPAT`, em
+vez de refletir o heartbeat real - lógica que não está em nenhum
+repositório Git, só existe no Quick Edit da Cloudflare (ver "O Master"
+acima). Não é bug de código deste repositório, e não é "operacional" no
+sentido de reiniciar processo - é comportamento do Master ao vivo que
+precisa ser lido e corrigido lá (Quick Edit), não aqui. `vone_worker_identity.ts`
+e o fluxo de identidade em `vone_owned_worker_main.ts` seguem corretos e
+mais evoluídos que os branches `chatgpt/worker-identity-r1`/
+`chatgpt/local-model-protocol-adapter-r1` (comparação real feita nesta
+sessão, PR #15 fechada sem merge por isso - ver abaixo) - isso não mudou,
+só a causa do `CAPABILITY_MISMATCH` em si, que não é esse código.
 
 **PR #8** (branch `copilot/cloudflare-control-direct-r2`) também foi
 resgatada: `src/cloudflare/vone_cloud_worker.ts` (o Worker que expõe
