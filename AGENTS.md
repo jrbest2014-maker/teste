@@ -67,13 +67,16 @@ npm run export:skills   # regenera skills/*/SKILL.md a partir de src/core/vone_s
 
 Isso só funciona no desktop do dono (Ollama local), não aqui:
 
-```bash
+```powershell
 git checkout chatgpt/local-model-protocol-adapter-r1   # ou claude/vone-session-checkpoint-fix-r1 para a correção de checkpoint
 npm ci
-npm test             # 13 arquivos, incluindo vone_local_control_plane_e2e (simulado, não é o Master real)
-$env:VONE_WORKER_TOKEN = "..."   # ver seção "O Master" - não existe emissão self-service
-npx ts-node src/server/vone_owned_worker_main.ts
+npm test             # 14 arquivos, incluindo vone_local_control_plane_e2e (simulado, não é o Master real)
+$env:VONE_WORKER_TOKEN = (Get-Content <caminho do seu worker.token> -Raw).Trim()   # ver seção "O Master" - não existe emissão self-service
+scripts\start-local-worker.ps1   # ou scripts/start-local-worker.sh no Linux/macOS - falha fechado, prioridade BelowNormal/nice -n 19
 ```
+Confirmado rodando de verdade no desktop do dono em 2026-10-10 (não
+simulado): autentica, sobe, worker `DESKTOP_445339E_VONE_EXECUTOR_02`
+(padrão atual - ver "O Master" abaixo pro porquê de não ser mais `_01`).
 
 ## O Master (`vone-control-plane`) - fora deste repositório
 
@@ -82,27 +85,37 @@ nenhum repositório Git acessível** - só existe como snapshots em
 `.zip`/pastas de backup no desktop do dono (`VONE-SECURE-BACKUPS`,
 `VONE-BACKUPS`), nunca versionado em Git de verdade.
 
-**Autenticação real (confirmada 2026-10-06 contra o Master ao vivo,
-versão `2.4.6-native-validation-r1`):** um único segredo compartilhado,
-comparado por hash, **não** um sistema de identidade por worker.
+**Autenticação real - ATUALIZADO 2026-10-10, confirmado contra o Master ao
+vivo em produção, versão `2.4.7-worker-identity-r1-compat`.** A nota
+anterior (06/10, versão `2.4.6`) dizia que o segredo compartilhado era o
+único mecanismo e que `vone_worker_identity.ts` era código morto - **isso
+mudou e foi diretamente verificado como incorreto agora.** O Master hoje
+tem os dois modos coexistindo:
+
 ```js
 const WORKER_TOKEN_SHA256 = 'f9b5f821c81e3d7c2058d04099b5f83968e101bbd0d1de42c732e72b7ea1219c';
 const CLIENT_TOKEN_SHA256 = '74172c4ba4bc827ce26af5789ea234e32c74bec7cd97685fbb58677bb44969b7';
 ```
-Esse par de hashes é idêntico em **todos** os snapshots de backup encontrados
-(de `VONE-FCB-P0` até `VONE-MCP-NATIVE-R1`, 2026-09-22 a 2026-09-26) -
-nunca rotacionou nessa linhagem, e bateu com o Master ao vivo quando
-testado. O `WORKER_TOKEN_SHA256` bateu com o hash SHA-256 (conteúdo
-trimado) do arquivo local
-`VONE-SECURE-BACKUPS\VONE-FCB-P5-CLOSED-20260924-205830\.secrets\worker.token`
-no desktop do dono - **nunca** peça pra alguém colar o valor desse token no
-chat; compare hashes, não valores.
-
-**`src/server/vone_worker_identity.ts`** (linha `chatgpt/*`,
-`issueWorkerIdentity`/per-worker token hasheado em D1) é **código morto**:
-nada no Master real o usa (o schema D1 real só tem `worker_status` e
-`jobs`, sem tabela de identidade). Não gere tokens com ele esperando que o
-Master os reconheça.
+Esse par de hashes continua igual em todos os snapshots de backup
+encontrados (`VONE-FCB-P0` até `VONE-MCP-NATIVE-R1`, 22-26/09) e segue
+sendo aceito pelo Master ao vivo - **mas só pra `workerId` sem registro de
+identidade**. Confirmado: `authorizeWorkerRequest()` (`vone_worker_identity.ts`)
+procura um registro por `workerId` primeiro; se existe, exige o token
+por-worker e **nega direto, sem cair pro segredo compartilhado** - não é
+mais código morto, está ativo em produção. `DESKTOP_445339E_VONE_EXECUTOR_01`
+tem um registro assim, `IDENTITY_R1`, **geração 2** (confirmado via
+`npx wrangler d1 execute vone-control-plane --remote --command "SELECT
+status_json FROM worker_status WHERE worker_id = '...'"` - esse é o jeito
+real de inspecionar isso, direto do terminal, sem abrir o painel web). Por
+design, o token de uma identidade só aparece uma vez, na emissão/rotação -
+nunca fica recuperável depois (nem no D1: a tabela `worker_status` só tem
+`worker_id, updated_at, version, status_json`, sem coluna de hash de
+token - o que quer que guarde o hash da identidade não está nessa tabela;
+não investigado onde). Por isso `_01` foi aposentado -
+`vone_owned_worker_main.ts` usa `DESKTOP_445339E_VONE_EXECUTOR_02` como
+padrão agora, que não tem registro de identidade e autentica pelo segredo
+compartilhado normalmente. **Nunca peça pra alguém colar o valor desse
+token no chat; compare hashes, não valores.**
 
 **Nunca peça, gere nem manuseie credencial Cloudflare (API token, account
 ID) nesta sessão.** Nunca cole token (worker ou Cloudflare) de volta no
