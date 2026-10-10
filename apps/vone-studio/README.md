@@ -18,6 +18,7 @@ espelham `RouteState`/`RoutingGates` do backend em
 ```bash
 npm install
 npm run dev        # abre em http://localhost:5173
+npm test           # 13 testes de componente (vitest)
 ```
 
 Sem `.env.local`, a UI roda contra `MockVOneApiClient` (`src/api/client.ts`),
@@ -41,9 +42,10 @@ responsivo mobile-first - sidebar e painel de codespace viram overlays que
 não ficam abertos ao mesmo tempo em telas estreitas (< 960px /
 < 1200px respectivamente).
 
-Falta só um service worker de cache offline se quiser PWA instalável
-offline-first - não incluído ainda porque o chat depende de rede de
-qualquer forma.
+Service worker offline-first em `public/sw.js` (registrado em
+`src/main.tsx`): shell e assets ficam em cache depois da primeira visita,
+testado de verdade com Playwright (visita online, depois offline + reload
+- app carrega igual, zero erro de console).
 
 ### 3. Desktop (Tauri)
 Scaffold em `src-tauri/` (Rust + `tauri.conf.json` apontando pra mesma
@@ -140,7 +142,5 @@ estiver errado - o código já está pronto pra rodar, só falta a rede.
 
 - Streaming de resposta token-a-token (hoje a resposta chega inteira).
 - Autenticação real (hoje não há login nenhum).
-- Service worker pra PWA offline-first.
 - Gerar os ícones corretos do Tauri pra cada plataforma antes de um build
   de release.
-- Testes de componente (hoje só há verificação manual via Playwright).

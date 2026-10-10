@@ -11,3 +11,11 @@ createRoot(container).render(
     <App />
   </StrictMode>,
 );
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((error) => {
+      console.error('SW_REGISTER_FAILED', error);
+    });
+  });
+}
