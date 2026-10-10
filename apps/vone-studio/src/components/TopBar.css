@@ -1,0 +1,68 @@
+.vone-topbar {
+  height: var(--vone-topbar-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--vone-space-3);
+  padding: 0 var(--vone-space-3);
+  background: var(--vone-bg-void);
+  border-bottom: 1px solid var(--vone-border-subtle);
+}
+
+.vone-topbar__icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--vone-radius-sm);
+  color: var(--vone-fg-secondary);
+  flex-shrink: 0;
+}
+
+.vone-topbar__icon-btn:hover {
+  background: var(--vone-bg-elevated);
+  color: var(--vone-accent);
+}
+
+.vone-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--vone-space-2);
+  font-weight: 700;
+  color: var(--vone-fg-primary);
+  letter-spacing: 0.01em;
+  flex-shrink: 0;
+}
+
+.vone-topbar__status {
+  margin-left: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--vone-space-3);
+  overflow-x: auto;
+}
+
+@media (max-width: 720px) {
+  .vone-topbar__brand span {
+    display: none;
+  }
+  .vone-topbar__gates {
+    display: none;
+  }
+  .vone-topbar__status {
+    max-width: 55vw;
+  }
+  .vone-badge {
+    max-width: 100%;
+  }
+  .vone-badge code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 38vw;
+    display: inline-block;
+    vertical-align: bottom;
+  }
+}

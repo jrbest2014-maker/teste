@@ -1,0 +1,48 @@
+.vone-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--vone-space-2);
+  padding: var(--vone-space-3) var(--vone-space-4);
+  border-top: 1px solid var(--vone-border-subtle);
+  background: var(--vone-bg-base);
+}
+
+.vone-composer__input {
+  flex: 1;
+  resize: none;
+  min-height: 44px;
+  max-height: 160px;
+  background: var(--vone-bg-elevated);
+  border: 1px solid var(--vone-border-subtle);
+  border-radius: var(--vone-radius-md);
+  padding: var(--vone-space-3);
+  color: var(--vone-fg-primary);
+  font-size: var(--vone-text-md);
+  transition: border-color var(--vone-duration-fast) var(--vone-ease);
+}
+
+.vone-composer__input:focus-visible {
+  border-color: var(--vone-accent);
+  outline: none;
+}
+
+.vone-composer__send {
+  flex-shrink: 0;
+  height: 44px;
+  padding: 0 var(--vone-space-5);
+  border-radius: var(--vone-radius-md);
+  background: var(--vone-accent);
+  color: var(--vone-fg-on-accent);
+  font-weight: 600;
+  transition: background var(--vone-duration-fast) var(--vone-ease);
+}
+
+.vone-composer__send:hover:not(:disabled) {
+  background: var(--vone-accent-strong);
+}
+
+.vone-composer__send:disabled {
+  background: var(--vone-bg-elevated);
+  color: var(--vone-fg-faint);
+  cursor: not-allowed;
+}

@@ -1,0 +1,49 @@
+.vone-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vone-space-1);
+  max-width: 720px;
+}
+
+.vone-message--user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.vone-message--assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.vone-message__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--vone-space-2);
+  font-size: var(--vone-text-xs);
+  color: var(--vone-fg-faint);
+  padding: 0 var(--vone-space-1);
+}
+
+.vone-message__author {
+  font-weight: 600;
+  color: var(--vone-fg-muted);
+}
+
+.vone-message__bubble {
+  border-radius: var(--vone-radius-lg);
+  padding: var(--vone-space-3) var(--vone-space-4);
+  background: var(--vone-bg-elevated);
+  border: 1px solid var(--vone-border-subtle);
+}
+
+.vone-message--user .vone-message__bubble {
+  background: var(--vone-accent-wash-12);
+  border-color: var(--vone-accent-wash-33);
+}
+
+.vone-message__text {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--vone-fg-primary);
+  line-height: var(--vone-leading-normal);
+}

@@ -1,0 +1,35 @@
+.vone-chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--vone-bg-base);
+}
+
+.vone-chat-panel__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--vone-space-6) var(--vone-space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--vone-space-4);
+}
+
+.vone-chat-panel__empty {
+  margin: auto;
+  color: var(--vone-fg-muted);
+  text-align: center;
+}
+
+.vone-chat-panel__typing {
+  font-size: var(--vone-text-sm);
+  color: var(--vone-fg-muted);
+  font-style: italic;
+  padding: 0 var(--vone-space-1);
+}
+
+@media (max-width: 720px) {
+  .vone-chat-panel__scroll {
+    padding: var(--vone-space-4);
+  }
+}

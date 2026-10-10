@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tsbuildinfo
 *.vsix
+src-tauri/target/
+src-tauri/gen/

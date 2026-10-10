@@ -1,0 +1,87 @@
+/*
+  Paleta oficial V-ONE, extraída de editor/vone-studio-theme (tema do VS Code
+  que já é a identidade visual do projeto). Esta é a "nossa paleta de cor" -
+  escura, acento âmbar - estendida aqui para um design system de app
+  completo (tipografia, espaçamento, raios, sombras, tokens semânticos de
+  estado). Qualquer novo componente deve consumir estas variáveis, nunca
+  cores literais.
+*/
+:root {
+  /* Superfícies (do mais profundo ao mais elevado) */
+  --vone-bg-void: #0e0e0e;
+  --vone-bg-base: #121212;
+  --vone-bg-raised: #161616;
+  --vone-bg-elevated: #1c1c1c;
+  --vone-bg-overlay: #242424;
+  --vone-border-subtle: #2a2a2a;
+  --vone-border-strong: #3a3a3a;
+
+  /* Texto */
+  --vone-fg-primary: #e8e6e3;
+  --vone-fg-secondary: #cfcdc9;
+  --vone-fg-muted: #8a8a8a;
+  --vone-fg-faint: #5a5a5a;
+  --vone-fg-on-accent: #121212;
+
+  /* Acento âmbar (identidade V-ONE) */
+  --vone-accent: #f2b134;
+  --vone-accent-strong: #ffc75a;
+  --vone-accent-wash-12: #f2b1341f;
+  --vone-accent-wash-20: #f2b13433;
+  --vone-accent-wash-33: #f2b13455;
+
+  /* Semântica de estado (espelha RouteState / RoutingGates do backend) */
+  --vone-success: #3ddc97;
+  --vone-success-strong: #5defb0;
+  --vone-danger: #e5534b;
+  --vone-danger-strong: #ff6b61;
+  --vone-info: #9fd3f2;
+  --vone-special: #d9a6f2;
+  --vone-warning: var(--vone-accent);
+
+  /* Tipografia */
+  --vone-font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --vone-font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --vone-text-xs: 0.75rem;
+  --vone-text-sm: 0.8125rem;
+  --vone-text-md: 0.9375rem;
+  --vone-text-lg: 1.125rem;
+  --vone-text-xl: 1.5rem;
+  --vone-leading-tight: 1.25;
+  --vone-leading-normal: 1.55;
+
+  /* Espaçamento (escala de 4px) */
+  --vone-space-1: 4px;
+  --vone-space-2: 8px;
+  --vone-space-3: 12px;
+  --vone-space-4: 16px;
+  --vone-space-5: 20px;
+  --vone-space-6: 24px;
+  --vone-space-8: 32px;
+  --vone-space-10: 40px;
+
+  /* Raios e sombras */
+  --vone-radius-sm: 6px;
+  --vone-radius-md: 10px;
+  --vone-radius-lg: 16px;
+  --vone-radius-pill: 999px;
+  --vone-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --vone-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --vone-shadow-glow-accent: 0 0 0 1px var(--vone-accent-wash-33), 0 0 24px -8px var(--vone-accent-wash-33);
+
+  /* Transições */
+  --vone-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --vone-duration-fast: 120ms;
+  --vone-duration-normal: 200ms;
+
+  /* Layout */
+  --vone-sidebar-w: 280px;
+  --vone-codespace-w: 320px;
+  --vone-topbar-h: 56px;
+  --vone-composer-h: auto;
+}
+
+/* V-ONE nasceu escuro e permanece escuro por padrão - é a identidade do
+   produto, não uma preferência de sistema. Um tema claro pode vir depois
+   como opção explícita, nunca como media-query automática, pra não diluir
+   a marca sem o usuário escolher. */

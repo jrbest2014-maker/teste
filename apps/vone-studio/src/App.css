@@ -1,0 +1,12 @@
+.vone-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.vone-app__body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
