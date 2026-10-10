@@ -27,7 +27,7 @@ import {
 } from './mobile-pwa.mjs';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
-const ALLOWED_TOOLS = new Set(['yellow_status','yellow_route_preview','ask_yellow','vone_executor_execute','vone_status','vone_resume_mission','vone_list_missions','vone_list_artifacts','vone_capacity_plan','vone_checkpoint','vone_register_artifact','vone_dispatch_worker','vone_release_worker','vone_learning_record','vone_learning_summary','vone_delegate_execute','vone_job_status']);
+const ALLOWED_TOOLS = new Set(['yellow_status','yellow_route_preview','ask_yellow','vone_executor_execute','vone_hub_chat','vone_status','vone_resume_mission','vone_list_missions','vone_list_artifacts','vone_capacity_plan','vone_checkpoint','vone_register_artifact','vone_dispatch_worker','vone_release_worker','vone_learning_record','vone_learning_summary','vone_delegate_execute','vone_job_status']);
 const CLIENT_TOKEN_SHA256 = '74172c4ba4bc827ce26af5789ea234e32c74bec7cd97685fbb58677bb44969b7';
 const WORKER_TOKEN_SHA256 = 'f9b5f821c81e3d7c2058d04099b5f83968e101bbd0d1de42c732e72b7ea1219c';
 const MCP_PUBLIC_ORIGIN = 'https://vone-control-plane.vone-technology.workers.dev';
@@ -2447,6 +2447,19 @@ async function handleMobileChat(request, env) {
       return reply({ok:passed,status:audit.status,execution,validation,task_id:taskId,audit,text:receipt},passed?200:202);
     } catch(error) {return reply({ok:false,status:'HOLD',error:String(error?.message||error).slice(0,300)},503);}
   }
+  const hubWorker=await workerSnapshotByCapability(env,'vone_hub_chat');
+  if(hubWorker.online && (hubWorker.worker?.status?.execution_contracts||[]).includes('VONE_HUB_CHAT_R1') && hubWorker.worker?.status?.ollama_health==='ONLINE'){
+    const taskId='hub_'+crypto.randomUUID();
+    try {
+      const result=await queueTool(env,'vone_hub_chat',{protocol:'VONE_HUB_CHAT_R1',task_id:taskId,prompt,max_tokens:maxTokens},{preserveOnTimeout:true,timeoutMs:26000});
+      if(result?.protocol==='VONE_HUB_CHAT_R1' && result.status==='DONE' && result.task_id===taskId && typeof result.text==='string' && result.text.trim()){
+        await saveMobileMessage(env,device.device_id,'assistant',result.text);
+        return reply({ok:true,text:result.text,backend:'vone-unified-hub-agent',route:'VONE_OWNED_HUB',model:result.model||null,worker_id:result.worker_id||null,task_id:taskId,execution_verified:true});
+      }
+      return reply({ok:false,status:'HOLD',error:'VONE_HUB_EXECUTION_PENDING',task_id:taskId,job_id:result?.job_id||null,evidence:result?.evidence||null,text:'V-ONE Hub em execucao; resultado ainda nao verificado.'},202);
+    }catch(error){return reply({ok:false,status:'HOLD',error:'VONE_HUB_DISPATCH_FAILED',detail:String(error?.message||error).slice(0,200)},503);}
+  }
+  return reply({ok:false,status:'HOLD',error:'VONE_HUB_NOT_VERIFIED',evidence:{worker_online:hubWorker.online,contracts:hubWorker.worker?.status?.execution_contracts||[],ollama_health:hubWorker.worker?.status?.ollama_health||null},text:'V-ONE Unified Hub indisponivel; nenhuma resposta direta do GLM foi utilizada.'},503);
   const mission = await env.DB.prepare(
     'SELECT mission_id,status,phase,objective,revision FROM continuity_missions WHERE mission_id=?'
   ).bind('vone-master').first();
