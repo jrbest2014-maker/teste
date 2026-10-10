@@ -260,6 +260,24 @@ reiniciado a partir de um checkout atualizado de `main` (`scripts/
 start-local-worker.ps1`/`.sh`, corrigidos nesta sessão pra apontar pra
 `main` em vez do branch antigo) pra re-registrar com o schema novo.
 
+**PR #8** (branch `copilot/cloudflare-control-direct-r2`) também foi
+resgatada: `src/cloudflare/vone_cloud_worker.ts` (o Worker que expõe
+`cf:deploy`, `/health`, `/status`, `/delegate`, `/infer`, `/recovery`,
+protocolo `VONE_DELEGATE_AUTHORITY_R2`) passa a verificar orçamento de
+nêutrons e heartbeat fresco do worker próprio contra o `GET /api/status`
+real do Master antes de liberar qualquer execução - nunca assume custo
+zero sem confirmação (`MASTER_UNAVAILABLE`/`CLOUD_ZERO_COST_NOT_VERIFIED`/
+`MASTER_STATUS_STALE` sempre caem em `HOLD`). `wrangler.jsonc` ganhou cron
+de 5 em 5 minutos pra log de snapshot de recovery. **Ressalva**: o contrato
+exato de campos do `/api/status` ao vivo (`cloudAiExecution`,
+`cloudBudget.{remaining_neurons,hard_cap_neurons}`, `ownedHeartbeat`/
+`owned_workers` etc.) não pôde ser reconferido nesta sessão - o host
+`vone-control-plane.vone-technology.workers.dev` não é alcançável daqui
+(proxy bloqueia CONNECT, DNS não resolve). O código já é defensivo (vários
+nomes de campo alternativos, qualquer ambiguidade cai em `HOLD`), mas o
+primeiro smoke test pós-deploy (`npm run cf:deploy` + bater em `/status`)
+precisa confirmar que o Master real responde no formato esperado.
+
 **PR #15** ("Implement V-ONE core agent loop, routing, and execution
 framework", branch `chatgpt/worker-identity-r1`) foi analisada arquivo por
 arquivo contra `main` pós-unificação: dos 58 arquivos de código, 52 (~89%)
