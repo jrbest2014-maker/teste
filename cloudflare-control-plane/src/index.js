@@ -600,6 +600,11 @@ async function reconcileCapacityRoutes(env) {
         // local capacity-heartbeat process.
         const workerObservedAt = Number(ownedExecutor.worker?.updatedAt || now);
         route.health.observed_at = new Date(workerObservedAt).toISOString();
+        const capabilities=ownedExecutor.worker?.status?.capabilities||[];
+        const contracts=ownedExecutor.worker?.status?.execution_contracts||[];
+        if(capabilities.includes('CODE_REVIEW')&&contracts.includes('VONE_EXECUTION_CONTRACT_R1')){
+          route.capabilities.task_classes=[...new Set([...(route.capabilities.task_classes||[]),'CODE_REVIEW'])];
+        }
         route.state = deriveCapacityState(route, now);
       }
     }
@@ -1566,7 +1571,7 @@ function publicExecutionRoute(route) {
 
 async function executionCapacitySnapshot(env, profile = 'AUTO', mode = 'AUTO') {
   const normalizedProfile = String(profile || 'AUTO').toUpperCase();
-  const taskClass = normalizedProfile === 'FAST' ? 'LLM_FAST' : 'LLM_LARGE_REASONING';
+  const taskClass = mode === 'OWNED' ? 'CODE_REVIEW' : normalizedProfile === 'FAST' ? 'LLM_FAST' : 'LLM_LARGE_REASONING';
   const ownedMode = mode === 'OWNED';
   const cloudMode = mode === 'CLOUD';
   const task = {
