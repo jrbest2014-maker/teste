@@ -135,14 +135,33 @@ voltando sozinho no horário de reset dele - isso nunca vai mudar por nada
 que esteja neste repositório, e não deveria: forjar isso seria quebra de
 ToS contra um serviço de terceiro, não uma melhoria do V-ONE.
 
-## 6. App standalone "V-ONE Studio.exe" - roteiro real (em andamento)
+## 6. App standalone "V-ONE Studio.exe" - roteiro real (PAUSADO, 2026-10-10)
 
-Autorizado explicitamente pelo dono em 2026-10-08, sabendo do custo real em
-minutos de GitHub Actions (runner Windows conta em dobro). Diferente das
-seções 1-5 (tema + worker, já prontos), isto é um projeto grande, do
-tamanho de manter uma distribuição própria do VS Code (o precedente real é
-o VSCodium) - não cabe inteiro numa sessão. Avançando em marcos, cada um
-só começa depois do anterior dar evidência real.
+**Status: pausado por decisão explícita do dono, não abandonado por
+limitação técnica nem esquecido.** Diferente das seções 1-5 (tema +
+worker, já prontos e funcionando, nenhum deles depende disto), isto é um
+projeto grande, do tamanho de manter uma distribuição própria do VS Code
+(o precedente real é o VSCodium) - não cabe inteiro numa sessão. A ideia
+era avançar em marcos, cada um só começando depois do anterior dar
+evidência real.
+
+**Por que parou:** Marco 1 (provar que o VS Code puro compila em CI) ficou
+bloqueado por um problema de cobrança na conta GitHub do dono
+("account is locked due to a billing issue", confirmado 3x via anotação
+real do check-run - não é suposição). Testamos e descartamos a hipótese
+mais óbvia (limite de gastos zerado em "Ações"/Actions - o dono zerou esse
+limite pra US$100.000.000 e o mesmo erro persistiu), o que aponta pra algo
+no status geral da conta (pagamento, fatura, verificação), não num
+produto específico. O dono decidiu, em 2026-10-10, não investir tempo
+nisso agora e seguir com o resto, que já funciona sem essa peça.
+
+**Se alguém retomar isto no futuro:** antes de tentar de novo, confirme
+que a cobrança da conta GitHub está realmente resolvida (não só o limite
+de gastos - o status geral de pagamento em `github.com/settings/billing`,
+visão geral, não a aba de Orçamentos) antes de disparar
+`vone-studio-build-probe.yml` de novo. As notas abaixo (achado sobre
+Copilot embutido no build, próximos marcos) continuam válidas, só a
+execução que está suspensa.
 
 **Marco 1 (`.github/workflows/vone-studio-build-probe.yml`, disparo manual
 via `workflow_dispatch` - nunca automático, pra manter o gasto sob
