@@ -388,7 +388,23 @@ A query de `SELECT` que busca `existing` (linha 77-79) precisa passar a
 trazer `pairing_code,enroll_expires_at` também (hoje só traz
 `device_id,secret_hash,status,access_expires_at,user_id`).
 
-**Por que não apliquei direto:** esse código não está neste repositório -
+**Atualização 2026-10-10 (mesmo dia): este conserto agora tem
+implementação real e testada**, não é mais só um diff em texto.
+`src/server/vone_mobile_enrollment.ts` reimplementa `startMobileEnrollment`
+de forma isolada (framework-agnostic, sem D1, interface
+`MobileDeviceStore` pra trocar por D1 de verdade na hora de portar) já
+com o conserto aplicado. `src/server/vone_mobile_enrollment.test.ts`
+reproduz o cenário exato do bug (reconexão do mesmo device_id/secret_hash
+enquanto ainda `PENDING`) e prova que o código devolvido é o mesmo, que a
+aprovação sobrevive à reconexão, e que os outros casos (expirado,
+revogado, segredo trocado, conta cruzada, input inválido) continuam
+corretos - 7 cenários, todos passando (`npm test`). Portar pro Worker ao
+vivo agora é: copiar a lógica de dentro de `startMobileEnrollment()`
+(já na forma certa, só adaptar o acesso a dado pra `env.DB.prepare(...)`
+em vez de `MobileDeviceStore`) via Quick Edit, não mais escrever do zero.
+
+**Por que não apliquei direto (continua valendo, só a confiança no
+conserto que mudou):** esse código não está neste repositório -
 só existe no Worker ao vivo, editável via Cloudflare Quick Edit, sem
 acesso nesta sessão (ver pendência de `CLOUDFLARE_API_TOKEN`/
 `CLOUDFLARE_ACCOUNT_ID` em configuração). Aplicar um patch às cegas, sem
