@@ -1,4 +1,9 @@
 node_modules/
 dist/
+dist-*/
 *.tsbuildinfo
 *.vsix
+src-tauri/target/
+src-tauri/gen/
+.env.local
+.env.*.local

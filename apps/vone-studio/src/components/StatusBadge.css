@@ -1,0 +1,75 @@
+.vone-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vone-space-1);
+  padding: var(--vone-space-1) var(--vone-space-3);
+  border-radius: var(--vone-radius-pill);
+  background: var(--vone-bg-elevated);
+  border: 1px solid var(--vone-border-subtle);
+  font-size: var(--vone-text-xs);
+  color: var(--vone-fg-secondary);
+  white-space: nowrap;
+}
+
+.vone-badge code {
+  font-family: var(--vone-font-mono);
+  color: var(--vone-fg-primary);
+}
+
+.vone-badge__sep {
+  color: var(--vone-fg-faint);
+}
+
+.vone-badge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.vone-badge--success .vone-badge__dot {
+  background: var(--vone-success);
+  box-shadow: 0 0 6px var(--vone-success);
+}
+.vone-badge--warning .vone-badge__dot {
+  background: var(--vone-accent);
+  box-shadow: 0 0 6px var(--vone-accent);
+}
+.vone-badge--danger .vone-badge__dot {
+  background: var(--vone-danger);
+  box-shadow: 0 0 6px var(--vone-danger);
+}
+.vone-badge--muted .vone-badge__dot {
+  background: var(--vone-fg-faint);
+}
+
+.vone-gate-chips {
+  display: flex;
+  gap: var(--vone-space-2);
+  flex-wrap: wrap;
+}
+
+.vone-chip {
+  font-size: var(--vone-text-xs);
+  font-family: var(--vone-font-mono);
+  padding: 2px var(--vone-space-2);
+  border-radius: var(--vone-radius-sm);
+  border: 1px solid transparent;
+  letter-spacing: 0.02em;
+}
+
+.vone-chip--success {
+  color: var(--vone-success);
+  background: color-mix(in srgb, var(--vone-success) 14%, transparent);
+  border-color: color-mix(in srgb, var(--vone-success) 35%, transparent);
+}
+.vone-chip--warning {
+  color: var(--vone-accent);
+  background: var(--vone-accent-wash-12);
+  border-color: var(--vone-accent-wash-33);
+}
+.vone-chip--danger {
+  color: var(--vone-danger-strong);
+  background: color-mix(in srgb, var(--vone-danger) 14%, transparent);
+  border-color: color-mix(in srgb, var(--vone-danger) 35%, transparent);
+}

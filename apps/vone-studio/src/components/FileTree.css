@@ -1,0 +1,25 @@
+.vone-file-tree {
+  font-size: var(--vone-text-sm);
+}
+
+.vone-file-node__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--vone-space-2);
+  padding: 4px var(--vone-space-2);
+  text-align: left;
+  color: var(--vone-fg-secondary);
+  border-radius: var(--vone-radius-sm);
+}
+
+.vone-file-node__row:hover {
+  background: var(--vone-bg-elevated);
+  color: var(--vone-fg-primary);
+}
+
+.vone-file-node__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

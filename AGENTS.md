@@ -245,20 +245,32 @@ falha nem vaza pra nuvem - é o comportamento correto sob
 `PAID_BLOCKED=INVIOLABLE` (não dá pra "resolver" disponibilidade botando
 servidor pago sempre ligado), não um bug.
 
-**Causa raiz separada, real, do `CAPABILITY_MISMATCH` na rota
-`client-desktop-vone-primary`:** o worker ao vivo está rodando em
-`auth_mode=LEGACY_COMPAT` (`identity_generation=null`), com `capabilities`
-no formato antigo (nomes de ferramenta: `ask_yellow`, `yellow_route_preview`,
-`yellow_status`) em vez do formato novo `task_classes` (`LLM_FAST` etc.)
-que `vone_capacity_plan`/`VONE_CAPACITY_SNAPSHOT_R1` exige. Não é falta de
-código - `vone_worker_identity.ts` e o fluxo de identidade em
-`vone_owned_worker_main.ts` já estão em `main`, mais evoluídos que nos
-branches `chatgpt/worker-identity-r1`/`chatgpt/local-model-protocol-adapter-r1`
-(comparação real feita nesta sessão, PR #15 fechada sem merge por isso - ver
-abaixo). É operacional: o processo do worker rodando no desktop precisa ser
-reiniciado a partir de um checkout atualizado de `main` (`scripts/
-start-local-worker.ps1`/`.sh`, corrigidos nesta sessão pra apontar pra
-`main` em vez do branch antigo) pra re-registrar com o schema novo.
+**Causa raiz do `CAPABILITY_MISMATCH` na rota `client-desktop-vone-primary`
+- CORRIGIDO EM 2026-10-10, a nota anterior (mesmo dia) estava errada.** A
+nota anterior dizia que bastava reiniciar o worker a partir de um checkout
+atualizado de `main` pra "re-registrar com o schema novo". **Testado ao
+vivo: reiniciar não resolve.** Rodou `scripts/start-local-worker.ps1` a
+partir de um checkout fresco de `main`, revalidado logo depois com
+`vone_capacity_plan`/`yellow_status` reais - `CAPABILITY_MISMATCH` e
+`auth_mode=LEGACY_COMPAT` continuaram idênticos a antes.
+
+Causa raiz real, confirmada lendo código: `vone_dual_worker.ts:38` manda no
+heartbeat `capabilities:['vone_executor_execute','vone_inference_execute']`
+- mas o `yellow_status` ao vivo reporta de volta
+`capabilities:['ask_yellow','yellow_route_preview','yellow_status']`,
+**um valor completamente diferente do que o worker de fato envia.** Isso só
+é possível se o Master substituir o `capabilities` reportado por um valor
+próprio e fixo para workers autenticados via `auth_mode=LEGACY_COMPAT`, em
+vez de refletir o heartbeat real - lógica que não está em nenhum
+repositório Git, só existe no Quick Edit da Cloudflare (ver "O Master"
+acima). Não é bug de código deste repositório, e não é "operacional" no
+sentido de reiniciar processo - é comportamento do Master ao vivo que
+precisa ser lido e corrigido lá (Quick Edit), não aqui. `vone_worker_identity.ts`
+e o fluxo de identidade em `vone_owned_worker_main.ts` seguem corretos e
+mais evoluídos que os branches `chatgpt/worker-identity-r1`/
+`chatgpt/local-model-protocol-adapter-r1` (comparação real feita nesta
+sessão, PR #15 fechada sem merge por isso - ver abaixo) - isso não mudou,
+só a causa do `CAPABILITY_MISMATCH` em si, que não é esse código.
 
 **PR #8** (branch `copilot/cloudflare-control-direct-r2`) também foi
 resgatada: `src/cloudflare/vone_cloud_worker.ts` (o Worker que expõe
@@ -291,3 +303,116 @@ resgatado: `cloudflare-control-plane/*` (snapshot do código do Master que
 contradiz a política acima de "Master não versionado", importa 2 arquivos
 que não existem no branch, e está desatualizado frente à versão
 `2.4.7-worker-identity-r1-compat` que já roda em produção).
+
+## Bug real encontrado em 2026-10-10 (conserto pronto, não aplicado - falta acesso ao Master ao vivo): código de pareamento regenerado a cada reconexão, trava aprovação
+
+Usuário relatou sintoma real: no painel `/vone-admin`, fica pedindo
+re-autenticação repetidamente mesmo com o dispositivo já tendo
+autenticado antes, e às vezes trava na tela de código de verificação sem
+ir pra frente nem pra trás.
+
+**Achado, com evidência em código, não suposição:** o snapshot do Master
+em `cloudflare-control-plane/*` (branch `origin/chatgpt/worker-identity-r1`,
+não mergeado - ver nota acima sobre por que não foi resgatado) reporta a
+mesma string de versão (`2.4.7-worker-identity-r1-compat`) que já está
+confirmada rodando em produção hoje, o que sugere parentesco real com o
+código ao vivo, mesmo o snapshot sendo incompleto/desatualizado em outros
+pontos. Lendo `cloudflare-control-plane/src/mobile-pwa.mjs` função por
+função:
+
+`startMobileEnrollment()` (linha 67) só reaproveita o estado existente
+quando o dispositivo já está `APPROVED` (linha 85-92). Pra qualquer outro
+caso - inclusive um dispositivo que já está `PENDING` com o **mesmo**
+`secret_hash`, só esperando aprovação - ela cai no `INSERT ... ON
+CONFLICT(device_id) DO UPDATE SET ... pairing_code=excluded.pairing_code`
+(linha 96-115), que **sempre** gera um código de 6 dígitos novo
+(`sixDigitCode()`, linha 94) e sobrescreve o anterior.
+
+No cliente, `enroll()` (linha 487) é chamado toda vez que `who()` falha
+no boot (linha 503) - e o boot roda de novo sempre que o PWA é
+relançado (iOS evicta app em background com frequência) ou que o listener
+de `focus` (linha 505) detecta mismatch de conta e faz
+`location.reload()`. Cada relançamento chama `/api/mobile/enroll/start`
+de novo pro mesmo dispositivo ainda `PENDING` - gerando um código novo e
+invalidando o que o administrador estava vendo na tela de aprovação
+(`mobile-admin.mjs`), que compara `typed.trim()!==d.pairing_code` contra
+o código antigo e falha com "Código não confere". Isso explica
+diretamente os dois sintomas relatados: pede de novo mesmo "já
+autenticado" (o dispositivo nunca chegou a ser aprovado porque o código
+muda debaixo do pé) e trava sem avançar (todo "aprovar" com o código
+antigo falha).
+
+**Conserto (não aplicado - precisa ser colado no equivalente real dentro
+do Worker `vone-control-plane` via Cloudflare Quick Edit, depois de
+localizar a função lá e confirmar que a lógica bate com este snapshot):**
+
+Substituir o bloco entre a checagem de `APPROVED` (linha 85-92) e a
+geração do código (linha 94) por uma checagem adicional que reaproveita o
+código existente quando o dispositivo já está `PENDING` com o mesmo
+segredo e ainda dentro da janela de expiração:
+
+```js
+if (
+  existing &&
+  existing.secret_hash === secretHash &&
+  existing.status === 'APPROVED' &&
+  Number(existing.access_expires_at || 0) > now
+) {
+  return json({ ok: true, status: 'APPROVED', device_id: deviceId });
+}
+
+// NOVO: mesmo dispositivo, mesmo segredo, ainda pendente e dentro da
+// janela - devolve o código já emitido em vez de gerar outro e invalidar
+// o que o admin está vendo.
+if (
+  existing &&
+  existing.secret_hash === secretHash &&
+  existing.status === 'PENDING' &&
+  Number(existing.enroll_expires_at || 0) > now
+) {
+  return json({
+    ok: true,
+    status: 'PENDING',
+    device_id: deviceId,
+    pairing_code: existing.pairing_code,
+    expires_at: existing.enroll_expires_at,
+  });
+}
+
+const pairingCode = sixDigitCode();
+// ... resto igual (INSERT/ON CONFLICT só roda quando é dispositivo
+// genuinamente novo, segredo mudou, ou o pareamento anterior expirou)
+```
+
+A query de `SELECT` que busca `existing` (linha 77-79) precisa passar a
+trazer `pairing_code,enroll_expires_at` também (hoje só traz
+`device_id,secret_hash,status,access_expires_at,user_id`).
+
+**Atualização 2026-10-10 (mesmo dia): este conserto agora tem
+implementação real e testada**, não é mais só um diff em texto.
+`src/server/vone_mobile_enrollment.ts` reimplementa `startMobileEnrollment`
+de forma isolada (framework-agnostic, sem D1, interface
+`MobileDeviceStore` pra trocar por D1 de verdade na hora de portar) já
+com o conserto aplicado. `src/server/vone_mobile_enrollment.test.ts`
+reproduz o cenário exato do bug (reconexão do mesmo device_id/secret_hash
+enquanto ainda `PENDING`) e prova que o código devolvido é o mesmo, que a
+aprovação sobrevive à reconexão, e que os outros casos (expirado,
+revogado, segredo trocado, conta cruzada, input inválido) continuam
+corretos - 7 cenários, todos passando (`npm test`). Portar pro Worker ao
+vivo agora é: copiar a lógica de dentro de `startMobileEnrollment()`
+(já na forma certa, só adaptar o acesso a dado pra `env.DB.prepare(...)`
+em vez de `MobileDeviceStore`) via Quick Edit, não mais escrever do zero.
+
+**Por que não apliquei direto (continua valendo, só a confiança no
+conserto que mudou):** esse código não está neste repositório -
+só existe no Worker ao vivo, editável via Cloudflare Quick Edit, sem
+acesso nesta sessão (ver pendência de `CLOUDFLARE_API_TOKEN`/
+`CLOUDFLARE_ACCOUNT_ID` em configuração). Aplicar um patch às cegas, sem
+ler a função real primeiro, arrisca piorar algo que hoje funciona.
+**Não é o segundo achado (perda de `device_id` no cliente quando o
+`localStorage` é evictado pelo iOS) que também contribui pro sintoma** -
+esse é mais estrutural (limite de armazenamento do Safari, não um bug de
+lógica simples) e precisa de decisão de produto (ex.: permitir conta
+`OWNER`/já aprovada pular aprovação manual pra um dispositivo novo, com
+outro tipo de verificação) antes de qualquer código - não implementado,
+nem desenhado em detalhe.

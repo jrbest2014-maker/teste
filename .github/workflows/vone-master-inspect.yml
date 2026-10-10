@@ -1,0 +1,91 @@
+name: V-ONE Master - inspeção read-only (sem deploy, sem gravar nada)
+
+# Resolve a pendência "confirmar contrato real de listSessions()/
+# sendMessage() contra o Worker ao vivo" sem precisar que a sessão do
+# Claude Code tenha credencial Cloudflare: as credenciais ficam só aqui,
+# como GitHub Actions secrets (Settings -> Secrets and variables ->
+# Actions no repositório, CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID),
+# nunca passam pela sessão de chat.
+#
+# Faz só um GET no Workers API (busca o código-fonte publicado do
+# vone-control-plane) e imprime o trecho relevante no log do job - não
+# faz PUT, não faz deploy, não grava nada. Apaga o arquivo baixado no
+# final pra não deixar o código-fonte inteiro do Master persistido em
+# lugar nenhum por acidente.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Verificar que as credenciais existem
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::CLOUDFLARE_API_TOKEN ausente nos secrets do repositório"; exit 78; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID ausente nos secrets do repositório"; exit 78; }
+
+      - name: Buscar o código-fonte publicado do vone-control-plane (GET, nunca PUT)
+        run: |
+          http_status=$(curl -sS -w "%{http_code}" -o live-master.js \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/vone-control-plane")
+          echo "HTTP status: $http_status"
+          if [ "$http_status" != "200" ]; then
+            echo "::error::Não foi possível ler o script (HTTP $http_status) - token sem permissão Workers Scripts, ou o nome do script é outro"
+            cat live-master.js
+            exit 1
+          fi
+          wc -l live-master.js
+
+      - name: Checar a string de versão que o AGENTS.md documenta como confirmada em produção
+        run: |
+          if grep -q "2\.4\.7-worker-identity-r1-compat" live-master.js; then
+            echo "VERSION_MARKER_FOUND: confirma que o deploy ao vivo é essa versão"
+          else
+            echo "VERSION_MARKER_NOT_FOUND: a versão ao vivo mudou desde a última checagem documentada"
+          fi
+
+      - name: Mostrar o contexto de startMobileEnrollment (achado do bug de pareamento)
+        run: |
+          node -e '
+            const fs = require("fs");
+            const src = fs.readFileSync("live-master.js", "utf8");
+            const idx = src.indexOf("startMobileEnrollment");
+            if (idx === -1) {
+              console.log("MARKER_NOT_FOUND: startMobileEnrollment não existe com esse nome no Worker ao vivo - a lógica real pode ter outro nome ou estar estruturada diferente do snapshot em chatgpt/worker-identity-r1.");
+              process.exit(0);
+            }
+            const start = Math.max(0, idx - 200);
+            const end = Math.min(src.length, idx + 2500);
+            console.log("---CONTEXTO REAL AO VIVO AO REDOR DE startMobileEnrollment---");
+            console.log(src.slice(start, end));
+          '
+
+      - name: Mostrar o contexto de mobile_devices (schema da tabela, pra comparar com o snapshot)
+        run: |
+          node -e '
+            const fs = require("fs");
+            const src = fs.readFileSync("live-master.js", "utf8");
+            const idx = src.indexOf("mobile_devices");
+            if (idx === -1) {
+              console.log("MARKER_NOT_FOUND: mobile_devices não aparece no Worker ao vivo.");
+              process.exit(0);
+            }
+            const start = Math.max(0, idx - 100);
+            const end = Math.min(src.length, idx + 1200);
+            console.log("---CONTEXTO REAL AO VIVO AO REDOR DE mobile_devices---");
+            console.log(src.slice(start, end));
+          '
+
+      - name: Limpar - não deixar o código-fonte completo em nenhum artefato
+        if: always()
+        run: rm -f live-master.js

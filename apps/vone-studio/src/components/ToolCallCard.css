@@ -1,0 +1,94 @@
+.vone-tool-card {
+  border: 1px solid var(--vone-border-subtle);
+  border-radius: var(--vone-radius-md);
+  background: var(--vone-bg-raised);
+  margin: var(--vone-space-2) 0;
+  overflow: hidden;
+}
+
+.vone-tool-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--vone-space-2);
+  width: 100%;
+  padding: var(--vone-space-2) var(--vone-space-3);
+  font-size: var(--vone-text-sm);
+  color: var(--vone-fg-secondary);
+  text-align: left;
+}
+
+.vone-tool-card__icon {
+  font-size: var(--vone-text-sm);
+}
+
+.vone-tool-card--done .vone-tool-card__icon {
+  color: var(--vone-success);
+}
+.vone-tool-card--error .vone-tool-card__icon {
+  color: var(--vone-danger);
+}
+.vone-tool-card--blocked .vone-tool-card__icon {
+  color: var(--vone-accent);
+}
+.vone-tool-card--running .vone-tool-card__icon {
+  color: var(--vone-info);
+  animation: vone-spin 1.2s linear infinite;
+}
+
+.vone-tool-card__name {
+  font-family: var(--vone-font-mono);
+  color: var(--vone-fg-primary);
+  font-weight: 600;
+}
+
+.vone-tool-card__status {
+  margin-left: auto;
+  font-size: var(--vone-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--vone-fg-muted);
+}
+
+.vone-tool-card__chevron {
+  color: var(--vone-fg-faint);
+}
+
+.vone-tool-card__body {
+  border-top: 1px solid var(--vone-border-subtle);
+  padding: var(--vone-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--vone-space-3);
+}
+
+.vone-tool-card__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vone-space-1);
+}
+
+.vone-tool-card__label {
+  font-size: var(--vone-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vone-fg-faint);
+}
+
+.vone-tool-card__section pre {
+  margin: 0;
+  padding: var(--vone-space-2) var(--vone-space-3);
+  background: var(--vone-bg-void);
+  border-radius: var(--vone-radius-sm);
+  font-family: var(--vone-font-mono);
+  font-size: var(--vone-text-xs);
+  color: var(--vone-fg-secondary);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes vone-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

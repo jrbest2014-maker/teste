@@ -1,0 +1,71 @@
+@import './tokens.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--vone-bg-base);
+  color: var(--vone-fg-primary);
+  font-family: var(--vone-font-ui);
+  font-size: var(--vone-text-md);
+  line-height: var(--vone-leading-normal);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--vone-accent);
+  outline-offset: 2px;
+  border-radius: var(--vone-radius-sm);
+}
+
+::selection {
+  background: var(--vone-accent-wash-33);
+}
+
+/* scrollbars discretas, no tom do tema */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--vone-border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--vone-border-strong);
+  border-radius: var(--vone-radius-pill);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
