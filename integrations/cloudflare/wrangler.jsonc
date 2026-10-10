@@ -1,0 +1,13 @@
+{
+  "name": "vone-free-ai-gateway-r1",
+  "main": "vone-free-ai-gateway.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "VONE_FREE_ONLY": "false",
+    "VONE_ACCOUNT_PLAN": "unverified"
+  }
+}
