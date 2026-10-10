@@ -28,7 +28,14 @@ function required(name: string): string {
 
 async function main(): Promise<void> {
     const masterUrl = process.env.VONE_MASTER_URL?.trim() || 'https://vone-control-plane.vone-technology.workers.dev';
-    const workerId = process.env.VONE_WORKER_ID?.trim() || 'DESKTOP_445339E_VONE_EXECUTOR_01';
+    // _01 is retired: the Master has an IDENTITY_R1 record (generation 2) registered
+    // for it with no recoverable token (per-worker tokens are shown once, at issuance/
+    // rotation, and never stored in plaintext - see AGENTS.md, "O Master"). Once a
+    // workerId has an identity record, the Master's authorizeWorkerRequest() denies it
+    // outright instead of falling back to the legacy shared secret, so VONE_WORKER_TOKEN
+    // (the shared secret) can never satisfy it again. _02 has no identity record, so it
+    // authenticates via the legacy path - confirmed against the live Master 2026-10-10.
+    const workerId = process.env.VONE_WORKER_ID?.trim() || 'DESKTOP_445339E_VONE_EXECUTOR_02';
     const workerToken = required('VONE_WORKER_TOKEN');
     const projectRoot = path.resolve(process.env.VONE_PROJECT_ROOT?.trim() || process.cwd());
     const model = process.env.VONE_OLLAMA_MODEL?.trim() || 'v-one-coder:fast';
