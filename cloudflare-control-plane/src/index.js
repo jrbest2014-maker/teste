@@ -1,6 +1,6 @@
 import { mobileAdminPage } from './mobile-admin.mjs';
 import { accessPage } from './access-page.mjs';
-import { userApi, ownerSession, approvedUserSession, approvedUserIdentity, accountsEnforced } from './accounts.mjs';
+import { userApi, ownerSession, approvedUserSession, approvedUserIdentity, userHasPermission, accountsEnforced } from './accounts.mjs';
 import {
   ZERO_COST_POLICY,
   routeToDb,
@@ -2342,14 +2342,22 @@ async function handleMobileTool(request, env) {
     return reply({ok:true,tool:name,capacity:plan});
   }
   if (name === 'vone_tool_catalog') {
-    return reply({ok:true,tool:name,scope:'mobile-workspace',execution_policy:'verified-only',cost_policy:{paid:'BLOCKED',unknown:'HOLD'},tools:[
-      {name:'vone_status',state:'AVAILABLE',mode:'READ_ONLY'},
-      {name:'vone_capacity_plan',state:'AVAILABLE',mode:'READ_ONLY'},
-      {name:'vone_tool_catalog',state:'AVAILABLE',mode:'READ_ONLY'},
-      {name:'external_search',state:'NOT_VERIFIED',mode:'NOT_EXECUTABLE_FROM_MOBILE'},
-      {name:'github_write',state:'NOT_VERIFIED',mode:'NOT_EXECUTABLE_FROM_MOBILE'},
-      {name:'owned_executor',state:'NOT_VERIFIED',mode:'NOT_EXECUTABLE_FROM_MOBILE'}
-    ]});
+    const user=await approvedUserIdentity(request,env);
+    if (!user) return reply({ok:false,error:'approved_account_required'},403);
+    const definitions=toolDefinitions();
+    const worker=await workerSnapshotByCapability(env,'vone_executor_execute');
+    const caps=worker.worker?.status?.capabilities||[];
+    const contracts=worker.worker?.status?.execution_contracts||[];
+    const codeReady=worker.online&&caps.includes('CODE_REVIEW')&&contracts.includes('VONE_EXECUTION_CONTRACT_R1');
+    const codeAllowed=await userHasPermission(request,env,'CODE_REVIEW');
+    const tools=await Promise.all(definitions.map(async d=>{
+      const readOnly=Boolean(d.annotations?.readOnlyHint);
+      const permission=readOnly?'TOOLS_READ':'AGENT_DISPATCH';
+      const allowed=await userHasPermission(request,env,permission);
+      return {name:d.name,description:d.description,mode:readOnly?'READ_ONLY':'MUTATING',state:allowed?(readOnly?'MCP_ONLY':'MCP_ONLY_VERIFICATION_REQUIRED'):'PERMISSION_DENIED',permission};
+    }));
+    tools.push({name:'vone_executor_execute',description:'Owned Executor native CODE_REVIEW via mobile chat execution mode',mode:'EXECUTION',state:!codeAllowed?'PERMISSION_DENIED':codeReady?'EXECUTOR_VERIFIED':'HOLD_NO_VERIFIED_EXECUTOR',permission:'CODE_REVIEW',evidence:{worker_online:worker.online,worker_id:worker.worker?.workerId||null,heartbeat_age_seconds:worker.ageSeconds,capabilities:caps,contracts}});
+    return reply({ok:true,tool:name,scope:'mobile-workspace',execution_policy:'verified-only',cost_policy:{paid:'BLOCKED',unknown:'HOLD'},tools});
   }
   return reply({ok:false,error:'tool_not_allowed'},403);
 }
@@ -2395,7 +2403,7 @@ async function handleMobileChat(request, env) {
   }
   if (agentIntent === 'CODE_REVIEW') {
     const user = await approvedUserIdentity(request,env);
-    if (!user || user.role !== 'OWNER') return reply({ok:false,error:'owner_approval_required_for_code_execution'},403);
+    if (!user || !(await userHasPermission(request,env,'CODE_REVIEW'))) return reply({ok:false,error:'code_review_permission_required'},403);
     const executor = await workerSnapshotByCapability(env,'vone_executor_execute');
     const capabilities = executor.worker?.status?.capabilities || [];
     const contracts = executor.worker?.status?.execution_contracts || [];
