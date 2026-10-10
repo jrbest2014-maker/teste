@@ -1530,7 +1530,7 @@ async function queueTool(env, toolName, args, options = {}) {
     }
     throw new Error('Worker timeout');
   } finally {
-    if (!preserveOnTimeout || (terminal && name !== 'vone_hub_chat')) {
+    if (!preserveOnTimeout || (terminal && toolName !== 'vone_hub_chat')) {
       await env.DB.prepare('DELETE FROM jobs WHERE id=?').bind(id).run().catch(() => {});
     }
   }
@@ -2524,6 +2524,15 @@ export default {
     if (method === 'GET' && url.pathname === '/api/mobile/enroll/status') return mobileEnrollmentStatus(request, env);
     if (method === 'GET' && url.pathname === '/api/mobile/me') return mobileWhoAmI(request, env);
     if (method === 'POST' && url.pathname === '/api/mobile/disconnect') return mobileDisconnect(request, env);
+    if (method === 'GET' && url.pathname === '/api/mobile/hub/jobs') {
+      const device=await mobileAuthorized(request,env);
+      if(!device)return reply({ok:false,error:'mobile_auth_required'},401);
+      const rows=await env.DB.prepare("SELECT id,status,created_at,claimed_at,finished_at,worker_id,args FROM jobs WHERE tool_name='vone_hub_chat' AND json_valid(args)=1 AND json_extract(args,'$.device_id')=? ORDER BY created_at DESC LIMIT 30").bind(device.device_id).all();
+      return reply({ok:true,scope:'device',jobs:(rows.results||[]).map(row=>{
+        let args={};try{args=JSON.parse(row.args||'{}')}catch{}
+        return {job_id:row.id,task_id:String(args.task_id||''),status:row.status,created_at:row.created_at,claimed_at:row.claimed_at,finished_at:row.finished_at,worker_id:row.worker_id||null};
+      })});
+    }
     if (method === 'GET' && url.pathname === '/api/mobile/hub/job') {
       const device=await mobileAuthorized(request,env);
       if(!device)return reply({ok:false,error:'mobile_auth_required'},401);
@@ -2537,7 +2546,11 @@ export default {
       if(state==='done'){
         let result={};try{result=JSON.parse(row.result||'{}')}catch{}
         if(result.protocol!=='VONE_HUB_CHAT_R1'||result.status!=='DONE'||result.task_id!==args.task_id||typeof result.text!=='string'||!result.text.trim())return reply({ok:false,status:'FAIL',error:'invalid_hub_result'},409);
-        return reply({ok:true,status:'PASS',text:result.text,model:result.model||null,worker_id:row.worker_id||null,task_id:args.task_id});
+        await ensureMobileHistorySchema(env);
+        const receiptId='hub_result_'+jobId;
+        await env.DB.prepare('INSERT OR IGNORE INTO mobile_chat_messages(id,device_id,role,content,created_at) VALUES(?,?,?,?,?)').bind(receiptId,device.device_id,'assistant',result.text.slice(0,24000),Date.now()).run();
+
+        return reply({ok:true,status:'PASS',text:result.text,model:result.model||null,worker_id:row.worker_id||null,task_id:args.task_id,job_id:jobId,receipt_id:'hub_result_'+jobId});
       }
       if(state==='error')return reply({ok:false,status:'FAIL',error:String(row.error||'worker_error').slice(0,200)},409);
       return reply({ok:false,status:'EXECUTANDO',job_id:jobId,worker_id:row.worker_id||null},202);

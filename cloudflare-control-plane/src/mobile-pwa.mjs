@@ -337,7 +337,7 @@ body{font-synthesis:none}
  .composer{padding:10px}
  .card .v{font-size:17px}
 }
-html{-webkit-font-smoothing:auto;text-rendering:geometricPrecision}.msg{font-size:16px;line-height:1.55;text-shadow:none;filter:none}.meta{font-size:12px}@media(max-width:680px){.workspace-content .chat{height:calc(100dvh - 420px);min-height:290px}}</style>
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}.msg{font-size:16px;line-height:1.55;text-shadow:none;filter:none}.meta{font-size:12px}@media(max-width:680px){.workspace-content .chat{height:calc(100dvh - 420px);min-height:290px}}</style>
 </head>
 <body>
 <div class="workspace-rail" id="workspaceRail"><div class="rail-brand"><span class="rail-glyph">V</span><div><strong>V·ONE</strong><small>CODEX WORKSPACE</small></div></div><div class="rail-label">WORKSPACE</div><button class="rail-action selected" id="railChat">◈ &nbsp; Agente Master</button><button class="rail-action" id="railHistory">◷ &nbsp; Histórico</button><button class="rail-action" id="railActivity">Atividades</button><button class="rail-action" id="railTools">⌘ &nbsp; Ferramentas</button><div class="rail-label">EXECUÇÃO</div><div class="rail-info"><span class="rail-led"></span> Control Plane Cloud<br><small>Cloudflare · Zero Bill</small></div><div class="rail-bottom"><a href="/vone-access" style="color:#b9c6e5;text-decoration:none">Login / Cadastro</a> · <a href="/vone-admin" style="color:#b9c6e5;text-decoration:none">Administração</a> <span>R3</span></div></div>
