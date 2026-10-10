@@ -233,10 +233,10 @@ export function mobileIcon() {
 
 export function mobileServiceWorker() {
   return text(`
-const CACHE='vone-mobile-r2';
+const CACHE='vone-mobile-r4';
 const SHELL=['/vone-mobile','/vone-mobile/manifest.webmanifest','/vone-mobile/icon.svg'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL))));
-self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
+self.addEventListener('activate',e=>e.waitUntil(Promise.all([caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('vone-mobile-')&&k!==CACHE).map(k=>caches.delete(k)))),self.clients.claim()])));
 self.addEventListener('fetch',e=>{
   if(e.request.method!=='GET') return;
   const u=new URL(e.request.url);
@@ -315,7 +315,7 @@ body{background:#070b12}.workspace-rail{position:fixed;inset:0 auto 0 0;width:23
 <script>
 const $=id=>document.getElementById(id);
 const enc=new TextEncoder();
-const store=window.localStorage;
+const store=(()=>{try{const s=window.localStorage;const k='vone.storage.probe';s.setItem(k,'1');s.removeItem(k);return s}catch{return {getItem:()=>null,setItem:()=>{},removeItem:()=>{}}}})();
 const state={deviceId:store.getItem('vone.device')||'',secret:store.getItem('vone.secret')||'',ready:false,flushing:false};
 function b64url(bytes){let s='';bytes.forEach(b=>s+=String.fromCharCode(b));return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}
 async function hashHex(s){const d=await crypto.subtle.digest('SHA-256',enc.encode(s));return [...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('')}
