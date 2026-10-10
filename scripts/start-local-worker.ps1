@@ -89,9 +89,20 @@ Ok "Hash de `$env:VONE_WORKER_TOKEN confere com o documentado em AGENTS.md."
 # worker cede CPU de bom grado pra qualquer outro app ativo (Codex
 # incluso), sem travar nada, sem gastar nada.
 Write-Host "[START] Subindo worker local (prioridade BelowNormal) como motor padrão do V-ONE Studio..." -ForegroundColor Yellow
+# Chama node.exe direto no bin.js do ts-node em vez de "npx" - no Windows,
+# npx é npx.cmd, e Process.Start com UseShellExecute=$false só resolve
+# .exe automaticamente (nunca .cmd/.bat), então "FileName=npx" sempre
+# falha aqui com "O sistema não pode encontrar o arquivo especificado".
+# node.exe é sempre um .exe de verdade - sem essa ambiguidade - e isso
+# também evita uma camada extra de processo (cmd.exe -> node), então a
+# prioridade abaixo cai direto no processo certo, sem corrida de condição.
+if (-not (Test-Path "node_modules/ts-node/dist/bin.js")) {
+    Fail "node_modules/ts-node/dist/bin.js não existe - rode 'npm ci' antes de subir o worker."
+}
 $psi = New-Object System.Diagnostics.ProcessStartInfo
-$psi.FileName = "npx"
-$psi.Arguments = "ts-node src/server/vone_owned_worker_main.ts"
+$psi.FileName = "node"
+$psi.Arguments = '"node_modules/ts-node/dist/bin.js" "src/server/vone_owned_worker_main.ts"'
+$psi.WorkingDirectory = (Get-Location).Path
 $psi.UseShellExecute = $false
 $proc = [System.Diagnostics.Process]::Start($psi)
 try {
